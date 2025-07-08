@@ -104,16 +104,39 @@ class TSVCVectorizerExperiment:
                 print("=" * 50)
                 
                 # Find ALL for loops, including nested ones
-                # Use regex to find all for loop headers
-                for_pattern = r'for\s*\([^)]+\)'
+                # Use regex to find all for loop headers - handle nested parentheses
                 all_for_headers = []
                 
-                for match in re.finditer(for_pattern, func_body):
-                    all_for_headers.append({
-                        'header': match.group(0),
-                        'start': match.start(),
-                        'end': match.end()
-                    })
+                # Find all 'for' keywords first
+                for_positions = []
+                for match in re.finditer(r'\bfor\s*\(', func_body):
+                    for_positions.append(match.start())
+                
+                # For each 'for' position, find the complete header by counting parentheses
+                for start_pos in for_positions:
+                    # Find the opening parenthesis
+                    paren_start = func_body.find('(', start_pos)
+                    if paren_start == -1:
+                        continue
+                    
+                    # Count parentheses to find the matching closing one
+                    paren_count = 0
+                    pos = paren_start
+                    while pos < len(func_body):
+                        if func_body[pos] == '(':
+                            paren_count += 1
+                        elif func_body[pos] == ')':
+                            paren_count -= 1
+                            if paren_count == 0:
+                                # Found the complete for header
+                                header = func_body[start_pos:pos+1]
+                                all_for_headers.append({
+                                    'header': header,
+                                    'start': start_pos,
+                                    'end': pos+1
+                                })
+                                break
+                        pos += 1
                 
                 print(f"\nDEBUG: Found {len(all_for_headers)} for loop headers:")
                 for h in all_for_headers:
@@ -164,16 +187,14 @@ class TSVCVectorizerExperiment:
                 # Look for computational loops
                 computational_loops = []
                 for loop in loops:
-                    # Skip benchmark loops
+                    # Skip benchmark loops (outer loops with 'nl' variable)
                     if 'nl' in loop['header']:
                         continue
                     
-                    # Skip loops containing dummy calls
-                    if 'dummy' in loop['text']:
-                        continue
-                    
-                    # Check if it has array operations
+                    # Check if it has array operations (this is the main criteria)
                     if re.search(r'\w+\[[^\]]+\]', loop['text']):
+                        # Don't skip loops that contain dummy calls - they might still be computational
+                        # The dummy call is typically at the end and doesn't affect the core computation
                         computational_loops.append(loop)
                 
                 print(f"\nDEBUG: Found {len(computational_loops)} computational loops")
@@ -207,6 +228,10 @@ class TSVCVectorizerExperiment:
                     core_loop = "// No computational loop found"
                     print("\nDEBUG: No computational loop found!")
                 
+                # Add missing variable declarations to the core loop
+                if core_loop and core_loop != "// No computational loop found":
+                    core_loop = self.add_missing_declarations(core_loop, func_body)
+                
                 # Clean up the loop
                 if core_loop and core_loop != "// No computational loop found":
                     # Normalize whitespace
@@ -236,7 +261,7 @@ class TSVCVectorizerExperiment:
                     
                     core_loop = '\n'.join(cleaned_lines)
                 
-                # Determine category based on comments
+                # Determine category based on comments and code patterns
                 category = 'unknown'
                 if 'linear dependence' in func_body:
                     category = 'linear_dependence'
@@ -246,6 +271,8 @@ class TSVCVectorizerExperiment:
                     category = 'reductions'
                 elif 'recurrences' in func_body:
                     category = 'recurrences'
+                elif 'if (' in func_body or 'condition' in func_body.lower():
+                    category = 'condition'
                 
                 functions[func_name] = {
                     'code': full_function,
@@ -262,6 +289,84 @@ class TSVCVectorizerExperiment:
                 print(f"Function {func_name} not found in tsvc.c")
         
         return functions
+    
+    def add_missing_declarations(self, core_loop, func_body):
+        """Add missing variable declarations to the extracted loop"""
+        import re
+        
+        # Find variables used in the core loop
+        used_vars = set()
+        
+        # Look for variable usage patterns (assignments, array indices, etc.)
+        var_patterns = [
+            r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\+\+',  # j++
+            r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*--',    # j--
+            r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\[',    # a[j]
+            r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=',     # j =
+            r'=\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',     # = j
+            r'\[\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\]', # [j]
+        ]
+        
+        for pattern in var_patterns:
+            matches = re.findall(pattern, core_loop)
+            for match in matches:
+                # Skip array names and loop variables
+                if match not in ['a', 'b', 'c', 'd', 'e', 'aa', 'bb', 'cc', 'i', 'nl']:
+                    used_vars.add(match)
+        
+        print(f"DEBUG: Variables used in core loop: {used_vars}")
+        
+        # Find declarations of these variables in the function body
+        declarations = []
+        for var in used_vars:
+            # Look for variable declarations or initializations
+            # Pattern 1: int j; or int j = value;
+            decl_pattern1 = rf'\b(int|real_t|float)\s+{var}\s*(?:=\s*[^;]+)?;'
+            # Pattern 2: j = value; (initialization without declaration)
+            decl_pattern2 = rf'\b{var}\s*=\s*[^;]+;'
+            
+            # Search in the function body before the core loop
+            core_loop_start = func_body.find(core_loop.strip())
+            if core_loop_start != -1:
+                before_loop = func_body[:core_loop_start]
+                
+                # Check for declaration
+                decl_match = re.search(decl_pattern1, before_loop)
+                if decl_match:
+                    # Also look for initialization of this variable
+                    init_match = re.search(decl_pattern2, before_loop)
+                    if init_match:
+                        # Extract the initialization value
+                        init_value = re.search(rf'{var}\s*=\s*([^;]+);', before_loop)
+                        if init_value:
+                            declarations.append(f"    int {var} = {init_value.group(1).strip()};")
+                            print(f"DEBUG: Found declaration and initialization for {var}: {init_value.group(0)}")
+                        else:
+                            declarations.append(f"    int {var} = -1;")  # Default
+                            print(f"DEBUG: Found declaration for {var}, using default initialization")
+                    else:
+                        declarations.append(f"    int {var};")
+                        print(f"DEBUG: Found declaration for {var}: {decl_match.group(0)}")
+                else:
+                    # Check for initialization only
+                    init_match = re.search(decl_pattern2, before_loop)
+                    if init_match:
+                        # Extract the initialization value
+                        init_value = re.search(rf'{var}\s*=\s*([^;]+);', before_loop)
+                        if init_value:
+                            declarations.append(f"    int {var} = {init_value.group(1).strip()};")
+                            print(f"DEBUG: Found initialization for {var}: {init_value.group(0)}")
+                        else:
+                            declarations.append(f"    int {var} = -1;")  # Default initialization
+                            print(f"DEBUG: Found initialization for {var}, using default value")
+        
+        # Add declarations before the core loop (not inside it)
+        if declarations:
+            print(f"DEBUG: Adding declarations: {declarations}")
+            # Prepend declarations before the loop
+            core_loop = '\n'.join(declarations) + '\n' + core_loop
+        
+        return core_loop
     
     def get_clang_vectorization_report(self, func_name, source_code):
         """Get Clang's vectorization analysis report"""
@@ -1089,7 +1194,7 @@ def main():
     experiment = TSVCVectorizerExperiment(api_key)
     
     # Test only s1113 (fixed typo)
-    experiment.run_experiment(functions_to_test=['s112','s1113', 's114', 's115'])
+    experiment.run_experiment(functions_to_test=['s1113', 's115', 's116'])
 
 
 if __name__ == "__main__":
