@@ -551,9 +551,10 @@ Always generate only the vectorized function implementation.
 
 When doing vectorization analysis, follow these steps:
 1. simplify the case by setting the inner loop iterations to a small number, outer loop as small as possible (if there is one).
-2. Unloop and enumerate the computing process, specify which variable is updated in each statement.
-3. When a variable is refered, trace back to the line when the variable last updated based on 2.
-4. Understand the pattern from the process of 1&2&3, then generate the actual vectorized code for the full loop range."""
+2. Enumerate the computing process, specify which variable is updated in each statement. When a variable is refered, trace back to the line when the variable last updated.
+3. Identify which variable use original value(no dependency), which variable use updated value(load after update).
+4. Making necessary unlooping/loop interchanging/statement reordering to eliminate dependencies.
+5. Understand the process above, then generate the actual vectorized code for the full loop range."""
     
     def vectorizer_agent(self, source_code, func_name, clang_analysis, feedback=None):
         """Generate vectorized code using Anthropic API"""
@@ -1296,7 +1297,7 @@ def main():
     experiment = TSVCVectorizerExperiment(api_key)
     
     # Test s126 function
-    experiment.run_experiment(functions_to_test=['s212'])
+    experiment.run_experiment(functions_to_test=['s211'])
 
 if __name__ == "__main__":
     main()
