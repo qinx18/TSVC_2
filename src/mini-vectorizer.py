@@ -269,8 +269,8 @@ class TSVCVectorizerExperiment:
                     category = 'linear_dependence'
                 elif 'induction variable' in func_body:
                     category = 'induction variable recognition'
-                elif 'control flow' in func_body:
-                    category = 'control_flow'
+                elif 'reductions' in func_body:
+                    category = 'reductions'
                 elif 'recurrences' in func_body:
                     category = 'recurrences'
                 elif 'if (' in func_body or 'condition' in func_body.lower():
@@ -695,13 +695,14 @@ void FUNC_NAME_original() {
 __VECTORIZED_CODE__
 
 int main() {
-    // Initialize arrays
+    // Initialize arrays with alternating positive/negative values
     for (int i = 0; i < LEN_1D; i++) {
-        a[i] = (real_t)i;
-        b[i] = (real_t)(i + 1);
-        c[i] = (real_t)(i + 2);
-        d[i] = (real_t)(i + 3);
-        e[i] = (real_t)(i + 4);
+        int sign = (i % 2 == 0) ? 1 : -1;
+        a[i] = (real_t)(sign * i);
+        b[i] = (real_t)(sign * (i + 1));
+        c[i] = (real_t)(sign * (i + 2));
+        d[i] = (real_t)(sign * (i + 3));
+        e[i] = (real_t)(sign * (i + 4));
     }
     
     // Make copies for comparison
@@ -840,21 +841,23 @@ void FUNC_NAME_original() {{
 __VECTORIZED_CODE__
 
 int main() {{
-    // Initialize 1D arrays
+    // Initialize 1D arrays with alternating positive/negative values
     for (int i = 0; i < LEN_1D; i++) {{
-        a[i] = (real_t)i;
-        b[i] = (real_t)(i + 1);
-        c[i] = (real_t)(i + 2);
-        d[i] = (real_t)(i + 3);
-        e[i] = (real_t)(i + 4);
+        int sign = (i % 2 == 0) ? 1 : -1;
+        a[i] = (real_t)(sign * i);
+        b[i] = (real_t)(sign * (i + 1));
+        c[i] = (real_t)(sign * (i + 2));
+        d[i] = (real_t)(sign * (i + 3));
+        e[i] = (real_t)(sign * (i + 4));
     }}
     
-    // Initialize 2D arrays
+    // Initialize 2D arrays with alternating positive/negative values
     for (int i = 0; i < LEN_2D; i++) {{
         for (int j = 0; j < LEN_2D; j++) {{
-            aa[i][j] = (real_t)(i * LEN_2D + j);
-            bb[i][j] = (real_t)(i + j + 1);
-            cc[i][j] = (real_t)(i - j + 2);
+            int sign = ((i + j) % 2 == 0) ? 1 : -1;
+            aa[i][j] = (real_t)(sign * (i * LEN_2D + j));
+            bb[i][j] = (real_t)(sign * (i + j * 2 + 1));
+            cc[i][j] = (real_t)(sign * (i - j + 2));
         }}
     }}{flat_array_init}
     
@@ -1279,7 +1282,7 @@ Here's what you tried before:
         print("\nBy Function:")
         for result in results:
             status = "SUCCESS" if result['success'] else "FAILED"
-            print(f"  {result['function']} ({result['category']}): {status} after {result['total_iterations']} iterations")
+            print(f"  {result['function']:6s} ({result['category']:20s}): {status} after {result['total_iterations']} iterations")
         
         # By category
         print("\nBy Category:")
