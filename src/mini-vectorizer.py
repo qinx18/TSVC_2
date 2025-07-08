@@ -1282,7 +1282,7 @@ Here's what you tried before:
         print("\nBy Function:")
         for result in results:
             status = "SUCCESS" if result['success'] else "FAILED"
-            print(f"  {result['function']:6s} ({result['category']:20s}): {status} after {result['total_iterations']} iterations")
+            print(f"  {result['function']:6s} ({result['category']}): {status} after {result['total_iterations']} iterations")
         
         # By category
         print("\nBy Category:")
@@ -1301,7 +1301,7 @@ def main():
     experiment = TSVCVectorizerExperiment(api_key)
     
     # Test s126 function
-    experiment.run_experiment(functions_to_test=['s161'])
+    experiment.run_experiment(functions_to_test=['s1161'])
 
 if __name__ == "__main__":
     main()
