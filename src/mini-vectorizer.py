@@ -265,8 +265,8 @@ class TSVCVectorizerExperiment:
                 category = 'unknown'
                 if 'linear dependence' in func_body:
                     category = 'linear_dependence'
-                elif 'transpose vectorization' in func_body:
-                    category = 'transpose_vectorization'
+                elif 'induction variable' in func_body:
+                    category = 'induction variable recognition'
                 elif 'reductions' in func_body:
                     category = 'reductions'
                 elif 'recurrences' in func_body:
@@ -296,69 +296,121 @@ class TSVCVectorizerExperiment:
         
         # Find variables used in the core loop
         used_vars = set()
+        used_arrays = set()
         
         # Look for variable usage patterns (assignments, array indices, etc.)
         var_patterns = [
-            r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\+\+',  # j++
-            r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*--',    # j--
-            r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\[',    # a[j]
-            r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=',     # j =
-            r'=\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',     # = j
-            r'\[\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\]', # [j]
+            r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\+\+',  # k++
+            r'\+\+\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',  # ++k
+            r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*--',    # k--
+            r'--\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',    # --k
+            r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=',     # k =
+            r'=\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',     # = k
+            r'\[\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\]', # [k]
+            r'\[\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*[-+]', # [k-1] or [k+1]
+        ]
+        
+        # Look for array usage patterns
+        array_patterns = [
+            r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\[',    # array[index]
         ]
         
         for pattern in var_patterns:
             matches = re.findall(pattern, core_loop)
             for match in matches:
-                # Skip array names and loop variables
-                if match not in ['a', 'b', 'c', 'd', 'e', 'aa', 'bb', 'cc', 'i', 'nl']:
+                # Skip common array names and loop variables that are typically declared in for loops
+                # But be smarter about 'i' and 'j' - only skip them if they're actually declared in for loops
+                if match in ['a', 'b', 'c', 'd', 'e', 'aa', 'bb', 'cc', 'nl']:
+                    continue
+                elif match in ['i', 'j']:
+                    # Check if this variable is declared in a for loop in the core loop
+                    for_loop_pattern = rf'for\s*\([^)]*\b{match}\s*='
+                    if not re.search(for_loop_pattern, core_loop):
+                        # Not declared in a for loop, so it needs declaration
+                        used_vars.add(match)
+                else:
                     used_vars.add(match)
         
+        for pattern in array_patterns:
+            matches = re.findall(pattern, core_loop)
+            for match in matches:
+                # Check if this might be a global array (not a simple variable)
+                if '_' in match or len(match) > 2:  # Likely global arrays like flat_2d_array
+                    used_arrays.add(match)
+        
         print(f"DEBUG: Variables used in core loop: {used_vars}")
+        print(f"DEBUG: Arrays used in core loop: {used_arrays}")
         
         # Find declarations of these variables in the function body
         declarations = []
+        
+        # Handle regular variables
         for var in used_vars:
             # Look for variable declarations or initializations
-            # Pattern 1: int j; or int j = value;
+            # Pattern 1: int k; or int k = value;
             decl_pattern1 = rf'\b(int|real_t|float)\s+{var}\s*(?:=\s*[^;]+)?;'
-            # Pattern 2: j = value; (initialization without declaration)
-            decl_pattern2 = rf'\b{var}\s*=\s*[^;]+;'
+            # Pattern 2: k = value; (initialization without declaration)
+            decl_pattern2 = rf'\b{var}\s*=\s*([^;]+);'
             
-            # Search in the function body before the core loop
-            core_loop_start = func_body.find(core_loop.strip())
-            if core_loop_start != -1:
-                before_loop = func_body[:core_loop_start]
+            # First, search in the entire function body for declaration
+            func_decl_match = re.search(decl_pattern1, func_body)
+            if func_decl_match:
+                print(f"DEBUG: Found declaration for {var}: {func_decl_match.group(0)}")
                 
-                # Check for declaration
-                decl_match = re.search(decl_pattern1, before_loop)
-                if decl_match:
-                    # Also look for initialization of this variable
-                    init_match = re.search(decl_pattern2, before_loop)
-                    if init_match:
-                        # Extract the initialization value
-                        init_value = re.search(rf'{var}\s*=\s*([^;]+);', before_loop)
-                        if init_value:
-                            declarations.append(f"    int {var} = {init_value.group(1).strip()};")
-                            print(f"DEBUG: Found declaration and initialization for {var}: {init_value.group(0)}")
-                        else:
-                            declarations.append(f"    int {var} = -1;")  # Default
-                            print(f"DEBUG: Found declaration for {var}, using default initialization")
+                # Look for initialization in the function body
+                # Find all assignments to this variable (but exclude increment/decrement)
+                init_matches = re.findall(rf'\b{var}\s*=\s*([^;]+);', func_body)
+                if init_matches:
+                    # Filter out increment/decrement operations
+                    valid_inits = []
+                    for init in init_matches:
+                        init = init.strip()
+                        # Skip if it's an increment/decrement or complex expression
+                        if not re.match(r'^.*[\+\-]{2}.*$', init) and not re.match(r'^.*[\+\-]\s*\d+$', init):
+                            valid_inits.append(init)
+                    
+                    if valid_inits:
+                        # Use the first valid initialization value found
+                        init_value = valid_inits[0]
+                        declarations.append(f"    int {var} = {init_value};")
+                        print(f"DEBUG: Found initialization for {var} = {init_value}")
                     else:
-                        declarations.append(f"    int {var};")
-                        print(f"DEBUG: Found declaration for {var}: {decl_match.group(0)}")
+                        # No valid initialization found, use default
+                        declarations.append(f"    int {var} = 1;")
+                        print(f"DEBUG: No valid initialization found for {var}, using default")
                 else:
-                    # Check for initialization only
-                    init_match = re.search(decl_pattern2, before_loop)
-                    if init_match:
-                        # Extract the initialization value
-                        init_value = re.search(rf'{var}\s*=\s*([^;]+);', before_loop)
-                        if init_value:
-                            declarations.append(f"    int {var} = {init_value.group(1).strip()};")
-                            print(f"DEBUG: Found initialization for {var}: {init_value.group(0)}")
-                        else:
-                            declarations.append(f"    int {var} = -1;")  # Default initialization
-                            print(f"DEBUG: Found initialization for {var}, using default value")
+                    # No initialization found, use default
+                    declarations.append(f"    int {var} = 1;")
+                    print(f"DEBUG: No initialization found for {var}, using default")
+            else:
+                # No declaration found, check if it's just initialized
+                init_matches = re.findall(rf'\b{var}\s*=\s*([^;]+);', func_body)
+                if init_matches:
+                    # Filter out increment/decrement operations
+                    valid_inits = []
+                    for init in init_matches:
+                        init = init.strip()
+                        # Skip if it's an increment/decrement or complex expression
+                        if not re.match(r'^.*[\+\-]{2}.*$', init) and not re.match(r'^.*[\+\-]\s*\d+$', init):
+                            valid_inits.append(init)
+                    
+                    if valid_inits:
+                        # Use the first valid initialization value found
+                        init_value = valid_inits[0]
+                        declarations.append(f"    int {var} = {init_value};")
+                        print(f"DEBUG: Found initialization without declaration for {var} = {init_value}")
+                    else:
+                        # Variable not found anywhere, add default declaration
+                        declarations.append(f"    int {var} = 1;")
+                        print(f"DEBUG: Variable {var} not found, adding default declaration")
+                else:
+                    # Variable not found anywhere, add default declaration
+                    declarations.append(f"    int {var} = 1;")
+                    print(f"DEBUG: Variable {var} not found, adding default declaration")
+        
+        # Handle global arrays - these don't need declarations but we should note them
+        for array in used_arrays:
+            print(f"DEBUG: Global array {array} detected - no declaration needed")
         
         # Add declarations before the core loop (not inside it)
         if declarations:
@@ -382,6 +434,14 @@ class TSVCVectorizerExperiment:
             # This looks like an inner loop depending on outer loop variable
             has_outer_dependency = True
         
+        # Check if flat_2d_array is used
+        uses_flat_array = 'flat_2d_array' in core_loop
+        
+        # Add flat_2d_array declaration if needed
+        flat_array_decl = ""
+        if uses_flat_array:
+            flat_array_decl = "real_t flat_2d_array[LEN_2D*LEN_2D];"
+        
         # Build test program
         if has_outer_dependency:
             # Wrap in a dummy outer loop
@@ -395,6 +455,7 @@ typedef float real_t;
 // Global arrays
 real_t a[LEN_1D], b[LEN_1D];
 real_t aa[LEN_2D][LEN_2D], bb[LEN_2D][LEN_2D], cc[LEN_2D][LEN_2D];
+{flat_array_decl}
 
 void test_function() {{
     // Dummy outer loop for context
@@ -419,6 +480,7 @@ typedef float real_t;
 // Global arrays
 real_t a[LEN_1D], b[LEN_1D], c[LEN_1D], d[LEN_1D], e[LEN_1D];
 real_t aa[LEN_2D][LEN_2D], bb[LEN_2D][LEN_2D], cc[LEN_2D][LEN_2D];
+{flat_array_decl}
 
 void test_function() {{
     {core_loop}
@@ -544,7 +606,7 @@ When doing vectorization analysis, follow these steps:
         try:
             message = self.client.messages.create(
                 model=self.model,
-                max_tokens=2000,
+                max_tokens=4000,
                 temperature=self.temperature,
                 system=system_prompt,
                 messages=[
@@ -701,12 +763,49 @@ int main() {
         core_loop = self.test_functions.get(func_name, {}).get('core_loop', '')
         needs_outer_loop = 'j < i' in core_loop or ('i' in core_loop and 'for' in core_loop and 'int i' not in core_loop)
         
+        # Check if flat_2d_array is used
+        uses_flat_array = 'flat_2d_array' in core_loop
+        
         if needs_outer_loop:
             loop_placeholder = """for (int i = 0; i < LEN_2D; i++) {
         CORE_LOOP_PLACEHOLDER
     }"""
         else:
             loop_placeholder = "CORE_LOOP_PLACEHOLDER"
+        
+        # Add flat_2d_array declaration if needed
+        flat_array_decl = ""
+        flat_array_init = ""
+        flat_array_copy = ""
+        flat_array_compare = ""
+        
+        if uses_flat_array:
+            flat_array_decl = "__attribute__((aligned(32))) real_t flat_2d_array[LEN_2D*LEN_2D];"
+            flat_array_init = """
+    // Initialize flat 2D array
+    for (int i = 0; i < LEN_2D*LEN_2D; i++) {
+        flat_2d_array[i] = (real_t)(i + 10);
+    }"""
+            flat_array_copy = """
+    // Make copies for flat array comparison
+    real_t flat_2d_array_original[LEN_2D*LEN_2D];
+    real_t flat_2d_array_vectorized[LEN_2D*LEN_2D];
+    
+    memcpy(flat_2d_array_original, flat_2d_array, sizeof(flat_2d_array));
+    memcpy(flat_2d_array_vectorized, flat_2d_array, sizeof(flat_2d_array));
+    
+    // Run original with flat array
+    memcpy(flat_2d_array, flat_2d_array_original, sizeof(flat_2d_array));"""
+            
+            flat_array_compare = """
+    // Also compare flat array if it was modified
+    for (int i = 0; i < LEN_2D*LEN_2D; i++) {
+        if (fabs(flat_2d_array_original[i] - flat_2d_array_vectorized[i]) > 1e-5) {
+            printf("Mismatch at flat_2d_array[%d]: original=%f, vectorized=%f\\n",
+                   i, flat_2d_array_original[i], flat_2d_array_vectorized[i]);
+            match = 0;
+        }
+    }"""
         
         return f"""
 #include <stdio.h>
@@ -728,6 +827,7 @@ __attribute__((aligned(32))) real_t e[LEN_1D];
 __attribute__((aligned(32))) real_t aa[LEN_2D][LEN_2D];
 __attribute__((aligned(32))) real_t bb[LEN_2D][LEN_2D];
 __attribute__((aligned(32))) real_t cc[LEN_2D][LEN_2D];
+{flat_array_decl}
 
 // Original implementation
 void FUNC_NAME_original() {{
@@ -754,36 +854,36 @@ int main() {{
             bb[i][j] = (real_t)(i + j + 1);
             cc[i][j] = (real_t)(i - j + 2);
         }}
-    }}
+    }}{flat_array_init}
     
     // Make copies for comparison (2D arrays)
-    real_t aa_original[LEN_2D][LEN_2D];
-    real_t aa_vectorized[LEN_2D][LEN_2D];
+    real_t bb_original[LEN_2D][LEN_2D];
+    real_t bb_vectorized[LEN_2D][LEN_2D];
     
-    memcpy(aa_original, aa, sizeof(aa));
-    memcpy(aa_vectorized, aa, sizeof(aa));
+    memcpy(bb_original, bb, sizeof(bb));
+    memcpy(bb_vectorized, bb, sizeof(bb));{flat_array_copy}
     
     // Run original
-    memcpy(aa, aa_original, sizeof(aa));
+    memcpy(bb, bb_original, sizeof(bb));
     FUNC_NAME_original();
-    memcpy(aa_original, aa, sizeof(aa));
+    memcpy(bb_original, bb, sizeof(bb));
     
     // Run vectorized
-    memcpy(aa, aa_vectorized, sizeof(aa));
+    memcpy(bb, bb_vectorized, sizeof(bb));
     FUNC_NAME_vectorized();
-    memcpy(aa_vectorized, aa, sizeof(aa));
+    memcpy(bb_vectorized, bb, sizeof(bb));
     
-    // Compare results
+    // Compare results (bb array is typically the output for these functions)
     int match = 1;
     for (int i = 0; i < LEN_2D; i++) {{
         for (int j = 0; j < LEN_2D; j++) {{
-            if (fabs(aa_original[i][j] - aa_vectorized[i][j]) > 1e-5) {{
-                printf("Mismatch at aa[%d][%d]: original=%f, vectorized=%f\\n",
-                       i, j, aa_original[i][j], aa_vectorized[i][j]);
+            if (fabs(bb_original[i][j] - bb_vectorized[i][j]) > 1e-5) {{
+                printf("Mismatch at bb[%d][%d]: original=%f, vectorized=%f\\n",
+                       i, j, bb_original[i][j], bb_vectorized[i][j]);
                 match = 0;
             }}
         }}
-    }}
+    }}{flat_array_compare}
     
     if (match) {{
         printf("SUCCESS\\n");
@@ -896,7 +996,7 @@ int main() {{
             # Compile
             exe_file = temp_file.replace('.c', '')
             compile_result = subprocess.run(
-                ['gcc', '-mavx2', '-lm', '-o', exe_file, temp_file],
+                ['gcc', '-mavx2', '-mfma', '-lm', '-o', exe_file, temp_file],
                 capture_output=True, text=True
             )
             
@@ -1093,7 +1193,9 @@ Here's what you tried before:
                     print(f"  - Error: {test_result['error_message']}")
                 if test_result['test_output']:
                     print(f"  - Test output: {test_result['test_output'][:200]}...")
-                print(f"  - Hint: {test_result['hint']}")
+                # For correctness errors, test_output and hint are repetitive, so only show test_output
+                if test_result['error_type'] != 'correctness':
+                    print(f"  - Hint: {test_result['hint']}")
                 
                 # Prepare feedback for next iteration
                 feedback = test_result
@@ -1193,9 +1295,8 @@ def main():
     
     experiment = TSVCVectorizerExperiment(api_key)
     
-    # Test only s1113 (fixed typo)
-    experiment.run_experiment(functions_to_test=['s1113', 's115', 's116'])
-
+    # Test s126 function
+    experiment.run_experiment(functions_to_test=['s1113','s123','s126'])
 
 if __name__ == "__main__":
     main()
