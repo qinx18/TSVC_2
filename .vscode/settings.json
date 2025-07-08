@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "array_defs.h": "c",
+        "common.h": "c"
+    }
+}

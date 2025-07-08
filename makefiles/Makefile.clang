@@ -1,17 +1,17 @@
-
-CC=clang
-CXX=clang++
+ARCH=-march=native
+CC=clang $(ARCH)
+CXX=clang++ $(ARCH)
 # no FC for clang
 FC=
 flags = -O3 -fstrict-aliasing
-vecflags = -fvectorize -fslp-vectorize-aggressive
+vecflags = -fvectorize 
 novecflags = -fno-vectorize
 omp_flags=-fopenmp=libomp
 
 ifdef VEC_REPORT
 vecflags+=-Rpass=loop-vectorize -Rpass-missed=loop-vectorize
-#vecflags+=-mllvm -debug-only=loop-vectorize
-#vecflags+=-Rpass-analysis=loop-vectorize
+vecflags+=-mllvm -debug-only=loop-vectorize
+vecflags+=-Rpass-analysis=loop-vectorize
 endif
 
 ieee_math_flags+=
