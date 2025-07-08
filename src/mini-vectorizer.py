@@ -431,9 +431,10 @@ Generate a complete C function named `{func_name}_vectorized` that vectorizes th
 Always generate only the vectorized function implementation.
 
 When doing vectorization analysis, follow these steps:
-1. simplify the case by setting the inner loop iterations to a small number, outer loop as small as possible (if there is one). Enumerate the computing process of each iteration.
-2. When a variable is refered(on the right side of '='), analyze when was the variable last updated(on the left side of '='). 
-3. Understand the pattern from the process of 1&2, then generate the actual vectorized code for the full loop range."""
+1. simplify the case by setting the inner loop iterations to a small number, outer loop as small as possible (if there is one). 
+2. Unloop and enumerate the computing process, specify which variable is updated in each statement.
+3. When a variable is refered, trace back to the line when the variable last updated based on 2. 
+4. Understand the pattern from the process of 1&2&3, then generate the actual vectorized code for the full loop range."""
         
         try:
             message = self.client.messages.create(
@@ -884,9 +885,10 @@ Generate  a complete C function named `{func_name}_vectorized` that vectorizes t
 Always generate only the vectorized function implementation.
 
 When doing vectorization analysis, follow these steps:
-1. simplify the case by setting the inner loop iterations to a small number, outer loop as small as possible (if there is one). Enumerate the computing process of each iteration.
-2. When a variable is refered(on the right side of '='), analyze when was the variable last updated(on the left side of '='). 
-3. Understand the pattern from the process of 1&2, then generate the actual vectorized code for the full loop range."""
+1. simplify the case by setting the inner loop iterations to a small number, outer loop as small as possible (if there is one). 
+2. Unloop and enumerate the computing process, specify which variable is updated in each statement.
+3. When a variable is refered, trace back to the line when the variable last updated based on 2. 
+4. Understand the pattern from the process of 1&2&3, then generate the actual vectorized code for the full loop range."""
         
         if feedback is None:
             user_prompt = f"""
@@ -1082,12 +1084,12 @@ def main():
     cleanup_workspace()
     
     # Use your Anthropic API key
-    api_key = "YOUR_ANTHROPIC_API_KEY_HERE"
+    api_key = "key"
     
     experiment = TSVCVectorizerExperiment(api_key)
     
     # Test only s1113 (fixed typo)
-    experiment.run_experiment(functions_to_test=['s112', 's114', 's115'])
+    experiment.run_experiment(functions_to_test=['s112','s1113', 's114', 's115'])
 
 
 if __name__ == "__main__":
