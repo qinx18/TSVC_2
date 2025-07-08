@@ -263,12 +263,14 @@ class TSVCVectorizerExperiment:
                 
                 # Determine category based on comments and code patterns
                 category = 'unknown'
-                if 'linear dependence' in func_body:
+                if 'nonlinear dependence' in func_body:
+                    category = 'nonlinear_dependence'
+                elif 'linear dependence' in func_body:
                     category = 'linear_dependence'
                 elif 'induction variable' in func_body:
                     category = 'induction variable recognition'
-                elif 'reductions' in func_body:
-                    category = 'reductions'
+                elif 'control flow' in func_body:
+                    category = 'control_flow'
                 elif 'recurrences' in func_body:
                     category = 'recurrences'
                 elif 'if (' in func_body or 'condition' in func_body.lower():
@@ -1277,7 +1279,7 @@ Here's what you tried before:
         print("\nBy Function:")
         for result in results:
             status = "SUCCESS" if result['success'] else "FAILED"
-            print(f"  {result['function']:6s} ({result['category']:20s}): {status} after {result['total_iterations']} iterations")
+            print(f"  {result['function']} ({result['category']}): {status} after {result['total_iterations']} iterations")
         
         # By category
         print("\nBy Category:")
@@ -1296,7 +1298,7 @@ def main():
     experiment = TSVCVectorizerExperiment(api_key)
     
     # Test s126 function
-    experiment.run_experiment(functions_to_test=['s141'])
+    experiment.run_experiment(functions_to_test=['s161'])
 
 if __name__ == "__main__":
     main()
