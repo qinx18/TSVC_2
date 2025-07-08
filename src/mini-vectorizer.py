@@ -1296,7 +1296,7 @@ def main():
     experiment = TSVCVectorizerExperiment(api_key)
     
     # Test s126 function
-    experiment.run_experiment(functions_to_test=['s211'])
+    experiment.run_experiment(functions_to_test=['s212'])
 
 if __name__ == "__main__":
     main()
