@@ -269,8 +269,10 @@ class TSVCVectorizerExperiment:
                     category = 'linear_dependence'
                 elif 'induction variable' in func_body:
                     category = 'induction variable recognition'
-                elif 'reductions' in func_body:
-                    category = 'reductions'
+                elif 'control flow' in func_body:
+                    category = 'control_flow'
+                elif 'statement reordering' in func_body:
+                    category = 'statement_reordering'
                 elif 'recurrences' in func_body:
                     category = 'recurrences'
                 elif 'if (' in func_body or 'condition' in func_body.lower():
@@ -529,6 +531,30 @@ int main() {{
         """Simple fallback analysis when Clang fails"""
         return f"Clang analysis failed for {func_name} - unable to determine vectorization status"
     
+    def get_system_prompt(self, func_name, loop_description):
+        """Generate the system prompt for vectorization"""
+        return f"""You are an expert in SIMD vectorization using AVX2 intrinsics.
+
+Please eliminate any dependencies and generate optimized vectorized C code that:
+
+Uses AVX2 intrinsics (mm256* functions)
+Targets 8-element vectors for float arrays
+Handles the identified dependencies correctly
+Ensures semantic equivalence with original code
+
+Generate a complete C function named `{func_name}_vectorized` that vectorizes this {loop_description} using AVX2 intrinsics. The function should:
+- Take no parameters (uses global arrays aa, bb, cc for 2D arrays or a, b, c, d, e for 1D arrays)
+- Include any necessary headers like #include <immintrin.h>
+- If it's a nested loop, vectorize the appropriate loop level
+
+Always generate only the vectorized function implementation.
+
+When doing vectorization analysis, follow these steps:
+1. simplify the case by setting the inner loop iterations to a small number, outer loop as small as possible (if there is one).
+2. Unloop and enumerate the computing process, specify which variable is updated in each statement.
+3. When a variable is refered, trace back to the line when the variable last updated based on 2.
+4. Understand the pattern from the process of 1&2&3, then generate the actual vectorized code for the full loop range."""
+    
     def vectorizer_agent(self, source_code, func_name, clang_analysis, feedback=None):
         """Generate vectorized code using Anthropic API"""
         
@@ -583,27 +609,7 @@ Generate a corrected `{func_name}_vectorized` function that:
 
 Output only the C function, no explanations."""
         
-        system_prompt = f"""You are an expert in SIMD vectorization using AVX2 intrinsics.
-
-Please eliminate any dependencies and generate optimized vectorized C code that:
-
-Uses AVX2 intrinsics (mm256* functions)
-Targets 8-element vectors for float arrays
-Handles the identified dependencies correctly
-Ensures semantic equivalence with original code
-
-Generate a complete C function named `{func_name}_vectorized` that vectorizes this {loop_description} using AVX2 intrinsics. The function should:
-- Take no parameters (uses global arrays aa, bb, cc for 2D arrays or a, b, c, d, e for 1D arrays)
-- Include any necessary headers like #include <immintrin.h>
-- If it's a nested loop, vectorize the appropriate loop level
-
-Always generate only the vectorized function implementation.
-
-When doing vectorization analysis, follow these steps:
-1. simplify the case by setting the inner loop iterations to a small number, outer loop as small as possible (if there is one). 
-2. Unloop and enumerate the computing process, specify which variable is updated in each statement.
-3. When a variable is refered, trace back to the line when the variable last updated based on 2. 
-4. Understand the pattern from the process of 1&2&3, then generate the actual vectorized code for the full loop range."""
+        system_prompt = self.get_system_prompt(func_name, loop_description)
         
         try:
             message = self.client.messages.create(
@@ -1079,26 +1085,15 @@ int main() {{
             f.write(vectorized_code)
         
         # Build the complete prompt that was sent to LLM
-        system_prompt = f"""You are an expert in SIMD vectorization using AVX2 intrinsics.
-
-Please eliminate any dependencies and generate optimized vectorized C code that:
-
-Uses AVX2 intrinsics (mm256* functions)
-Targets 8-element vectors for float arrays
-Handles the identified dependencies correctly
-Ensures semantic equivalence with original code
-
-Generate  a complete C function named `{func_name}_vectorized` that vectorizes this loop using AVX2 intrinsics. The function should:
-- Take no parameters (uses global arrays a and b)
-- Include any necessary headers like #include <immintrin.h>
-
-Always generate only the vectorized function implementation.
-
-When doing vectorization analysis, follow these steps:
-1. simplify the case by setting the inner loop iterations to a small number, outer loop as small as possible (if there is one). 
-2. Unloop and enumerate the computing process, specify which variable is updated in each statement.
-3. When a variable is refered, trace back to the line when the variable last updated based on 2. 
-4. Understand the pattern from the process of 1&2&3, then generate the actual vectorized code for the full loop range."""
+        # Determine loop description for the system prompt
+        if feedback is None:
+            loop_description = f"loop:\n{source_code}"
+        else:
+            # For repair attempts, we need to reconstruct the loop description
+            # This is a simplified version since we don't have all the context here
+            loop_description = "loop"
+        
+        system_prompt = self.get_system_prompt(func_name, loop_description)
         
         if feedback is None:
             user_prompt = f"""
@@ -1301,7 +1296,7 @@ def main():
     experiment = TSVCVectorizerExperiment(api_key)
     
     # Test s126 function
-    experiment.run_experiment(functions_to_test=['s1161'])
+    experiment.run_experiment(functions_to_test=['s211'])
 
 if __name__ == "__main__":
     main()
