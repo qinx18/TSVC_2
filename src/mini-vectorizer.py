@@ -556,7 +556,7 @@ When doing vectorization analysis, follow these steps:
 2. Enumerate the process as the code written, identify which variable is refered as its original value and which one is refered as its updated value.
 3. Variables that use original values load operand directly from memory, then compute, then store the values. 
    After that, variables that use updated value load from memory, then compute, finally store the values.
-4. Making necessary unlooping/loop interchanging/statement reordering based on step 3.
+4. Making necessary unlooping, loop distribution, loop interchanging, statement reordering based on step 3.
 5. Understand the pattern, then generate the actual vectorized code for the full loop range."""
     
     def vectorizer_agent(self, source_code, func_name, clang_analysis, feedback=None):
@@ -1300,7 +1300,7 @@ def main():
     experiment = TSVCVectorizerExperiment(api_key)
     
     # Test s126 function
-    experiment.run_experiment(functions_to_test=['s222'])
+    experiment.run_experiment(functions_to_test=['s233', 's2233'])
 
 if __name__ == "__main__":
     main()
