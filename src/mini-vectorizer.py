@@ -553,8 +553,8 @@ Always generate only the vectorized function implementation.
 
 When doing vectorization analysis, follow these steps:
 1. Simplify the case by setting the loop iterations to a small number. 
-2. Enumerate the process as the code written, identify which variable is refered as its original value and which one is refered as its updated value.
-3. Variables that use original values load operand directly from memory, then compute, then store the values. 
+2. Enumerate the process as the code written, identify which element is refered as its original value and which one is refered as its updated value.
+3. Load original values directly from memory first, then compute variables that use original value, then store the values. 
    After that, variables that use updated value load from memory, then compute, finally store the values.
 4. Making necessary unlooping, loop distribution, loop interchanging, statement reordering based on step 3.
 5. Understand the pattern, then generate the actual vectorized code for the full loop range."""
@@ -674,11 +674,62 @@ Output only the C function, no explanations."""
             return self._create_2d_test_harness(func_name)
         else:
             # 1D array test harness (default)
-            return self._create_1d_test_harness()
+            return self._create_1d_test_harness(func_name)
     
-    def _create_1d_test_harness(self):
+    def _detect_modified_arrays(self, func_name):
+        """Detect which arrays are modified by analyzing the core loop"""
+        if not func_name or func_name not in self.test_functions:
+            return ['a']  # Default fallback
+        
+        core_loop = self.test_functions[func_name]['core_loop']
+        modified_arrays = []
+        
+        # Look for assignment patterns: array[index] = ...
+        import re
+        assignment_patterns = [
+            r'\b([a-e])\s*\[\s*[^\]]+\]\s*=',  # Single letter arrays: a[i] = ...
+            r'\b(aa|bb|cc)\s*\[\s*[^\]]+\]\s*\[\s*[^\]]+\]\s*=',  # 2D arrays: aa[i][j] = ...
+        ]
+        
+        for pattern in assignment_patterns:
+            matches = re.findall(pattern, core_loop)
+            for match in matches:
+                if match not in modified_arrays:
+                    modified_arrays.append(match)
+        
+        # If no arrays detected as modified, default to 'a'
+        if not modified_arrays:
+            modified_arrays = ['a']
+        
+        print(f"DEBUG: Detected modified arrays for {func_name}: {modified_arrays}")
+        return modified_arrays
+    
+    def _create_1d_test_harness(self, func_name=None):
         """Create test harness for functions using 1D arrays"""
-        return """
+        # Determine which arrays are modified by analyzing the core loop
+        modified_arrays = self._detect_modified_arrays(func_name) if func_name else ['a']
+        
+        # Generate comparison code for all modified arrays
+        comparison_code = ""
+        for array in modified_arrays:
+            comparison_code += f"""
+    // Compare array '{array}'
+    for (int i = 0; i < LEN_1D; i++) {{
+        if (fabs({array}_original[i] - {array}_vectorized[i]) > 1e-5) {{
+            printf("Mismatch at {array}[%d]: original=%f, vectorized=%f\\\\n",
+                   i, {array}_original[i], {array}_vectorized[i]);
+            match = 0;
+        }}
+    }}"""
+        
+        # Generate copy operations for modified arrays after running functions
+        copy_after_original = ""
+        copy_after_vectorized = ""
+        for array in modified_arrays:
+            copy_after_original += f"    memcpy({array}_original, {array}, sizeof({array}));\n"
+            copy_after_vectorized += f"    memcpy({array}_vectorized, {array}, sizeof({array}));\n"
+        
+        return f"""
 #include <stdio.h>
 #include <stdlib.h>
 #include <immintrin.h>
@@ -697,23 +748,23 @@ __attribute__((aligned(32))) real_t d[LEN_1D];
 __attribute__((aligned(32))) real_t e[LEN_1D];
 
 // Original implementation
-void FUNC_NAME_original() {
+void FUNC_NAME_original() {{
     CORE_LOOP_PLACEHOLDER
-}
+}}
 
 // Vectorized function will be inserted here
 __VECTORIZED_CODE__
 
-int main() {
+int main() {{
     // Initialize arrays with alternating positive/negative values
-    for (int i = 0; i < LEN_1D; i++) {
+    for (int i = 0; i < LEN_1D; i++) {{
         int sign = (i % 2 == 0) ? 1 : -1;
         a[i] = (real_t)(sign * i);
         b[i] = (real_t)(sign * (i + 1));
         c[i] = (real_t)(sign * (i + 2));
         d[i] = (real_t)(sign * (i + 3));
         e[i] = (real_t)(sign * (i + 4));
-    }
+    }}
     
     // Make copies for comparison
     real_t a_original[LEN_1D], b_original[LEN_1D], c_original[LEN_1D];
@@ -740,8 +791,7 @@ int main() {
     memcpy(d, d_original, sizeof(d));
     memcpy(e, e_original, sizeof(e));
     FUNC_NAME_original();
-    memcpy(a_original, a, sizeof(a));
-    
+{copy_after_original}
     // Run vectorized
     memcpy(a, a_vectorized, sizeof(a));
     memcpy(b, b_vectorized, sizeof(b));
@@ -749,25 +799,17 @@ int main() {
     memcpy(d, d_vectorized, sizeof(d));
     memcpy(e, e_vectorized, sizeof(e));
     FUNC_NAME_vectorized();
-    memcpy(a_vectorized, a, sizeof(a));
+{copy_after_vectorized}
+    // Compare results for all modified arrays
+    int match = 1;{comparison_code}
     
-    // Compare results (only check array 'a' as it's typically the output)
-    int match = 1;
-    for (int i = 0; i < LEN_1D; i++) {
-        if (fabs(a_original[i] - a_vectorized[i]) > 1e-5) {
-            printf("Mismatch at a[%d]: original=%f, vectorized=%f\\n",
-                   i, a_original[i], a_vectorized[i]);
-            match = 0;
-        }
-    }
-    
-    if (match) {
-        printf("SUCCESS\\n");
+    if (match) {{
+        printf("SUCCESS\\\\n");
         return 0;
-    } else {
+    }} else {{
         return 1;
-    }
-}
+    }}
+}}
 """
     
     def _create_2d_test_harness(self, func_name):
@@ -1300,7 +1342,7 @@ def main():
     experiment = TSVCVectorizerExperiment(api_key)
     
     # Test s126 function
-    experiment.run_experiment(functions_to_test=['s233', 's2233'])
+    experiment.run_experiment(functions_to_test=['s241'])
 
 if __name__ == "__main__":
     main()
