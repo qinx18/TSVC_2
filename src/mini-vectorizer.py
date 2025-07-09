@@ -314,6 +314,10 @@ class TSVCVectorizerExperiment:
             r'=\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',     # = k
             r'\[\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\]', # [k]
             r'\[\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*[-+]', # [k-1] or [k+1]
+            r'\+\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',    # + s1
+            r'-\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',     # - s1
+            r'\*\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',    # * s1
+            r'/\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',     # / s1
         ]
         
         # Look for array usage patterns
@@ -335,6 +339,7 @@ class TSVCVectorizerExperiment:
                         # Not declared in a for loop, so it needs declaration
                         used_vars.add(match)
                 else:
+                    # Include all other variables (like s1, s2, etc.)
                     used_vars.add(match)
         
         for pattern in array_patterns:
@@ -367,13 +372,15 @@ class TSVCVectorizerExperiment:
                 # Find all assignments to this variable (but exclude increment/decrement)
                 init_matches = re.findall(rf'\b{var}\s*=\s*([^;]+);', func_body)
                 if init_matches:
-                    # Filter out increment/decrement operations
+                    # Filter out increment/decrement operations and complex expressions
                     valid_inits = []
                     for init in init_matches:
                         init = init.strip()
                         # Skip if it's an increment/decrement or complex expression
                         if not re.match(r'^.*[\+\-]{2}.*$', init) and not re.match(r'^.*[\+\-]\s*\d+$', init):
-                            valid_inits.append(init)
+                            # Also skip if it contains references to unavailable variables like 'x->'
+                            if '->' not in init and 'func_args' not in init:
+                                valid_inits.append(init)
                     
                     if valid_inits:
                         # Use the first valid initialization value found
@@ -381,24 +388,26 @@ class TSVCVectorizerExperiment:
                         declarations.append(f"    int {var} = {init_value};")
                         print(f"DEBUG: Found initialization for {var} = {init_value}")
                     else:
-                        # No valid initialization found, use default
+                        # No valid initialization found, use test value
                         declarations.append(f"    int {var} = 1;")
-                        print(f"DEBUG: No valid initialization found for {var}, using default")
+                        print(f"DEBUG: No valid initialization found for {var}, using test value")
                 else:
-                    # No initialization found, use default
+                    # No initialization found, use test value
                     declarations.append(f"    int {var} = 1;")
-                    print(f"DEBUG: No initialization found for {var}, using default")
+                    print(f"DEBUG: No initialization found for {var}, using test value")
             else:
                 # No declaration found, check if it's just initialized
                 init_matches = re.findall(rf'\b{var}\s*=\s*([^;]+);', func_body)
                 if init_matches:
-                    # Filter out increment/decrement operations
+                    # Filter out increment/decrement operations and complex expressions
                     valid_inits = []
                     for init in init_matches:
                         init = init.strip()
                         # Skip if it's an increment/decrement or complex expression
                         if not re.match(r'^.*[\+\-]{2}.*$', init) and not re.match(r'^.*[\+\-]\s*\d+$', init):
-                            valid_inits.append(init)
+                            # Also skip if it contains references to unavailable variables like 'x->'
+                            if '->' not in init and 'func_args' not in init:
+                                valid_inits.append(init)
                     
                     if valid_inits:
                         # Use the first valid initialization value found
@@ -406,13 +415,13 @@ class TSVCVectorizerExperiment:
                         declarations.append(f"    int {var} = {init_value};")
                         print(f"DEBUG: Found initialization without declaration for {var} = {init_value}")
                     else:
-                        # Variable not found anywhere, add default declaration
+                        # Variable not found anywhere, add test value declaration
                         declarations.append(f"    int {var} = 1;")
-                        print(f"DEBUG: Variable {var} not found, adding default declaration")
+                        print(f"DEBUG: Variable {var} not found or has complex initialization, adding test value declaration")
                 else:
-                    # Variable not found anywhere, add default declaration
+                    # Variable not found anywhere, add test value declaration
                     declarations.append(f"    int {var} = 1;")
-                    print(f"DEBUG: Variable {var} not found, adding default declaration")
+                    print(f"DEBUG: Variable {var} not found, adding test value declaration")
         
         # Handle global arrays - these don't need declarations but we should note them
         for array in used_arrays:
@@ -1342,7 +1351,7 @@ def main():
     experiment = TSVCVectorizerExperiment(api_key)
     
     # Test s126 function
-    experiment.run_experiment(functions_to_test=['s241'])
+    experiment.run_experiment(functions_to_test=['s244'])
 
 if __name__ == "__main__":
     main()
