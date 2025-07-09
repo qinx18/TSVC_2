@@ -57,7 +57,7 @@ class TSVCVectorizerExperiment:
     def __init__(self, api_key):
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model = "claude-sonnet-4-20250514"
-        self.max_iterations = 3
+        self.max_iterations = 10
         self.temperature = 0.2  # Lower temperature for more consistent code generation
         self.results = {}
         
@@ -561,11 +561,13 @@ Generate a complete C function named `{func_name}_vectorized` that vectorizes th
 Always generate only the vectorized function implementation.
 
 When doing vectorization analysis, follow these steps:
-1. Simplify the case by setting the loop iterations to a small number. 
-2. Enumerate the process as the code written, identify which element is refered as its original value and which one is refered as its updated value.
-3. Load original values directly from memory first, then compute variables that use original value, then store the values. 
+1. Simplify the case by setting the loop iterations to a small number and enumerate the process as the code written. 
+2. When enumerating, recognize overwrittened assignments and calculations that cancled each other out, remove all these redundant operations,
+   aware the edge cases at the beginning and the end.
+3. For the rest of operations, identify which element is refered as its original value and which one is refered as its updated value.
+4. Load original values directly from memory first, then compute variables that use original value, then store the values. 
    After that, variables that use updated value load from memory, then compute, finally store the values.
-4. Making necessary unlooping, loop distribution, loop interchanging, statement reordering based on step 3.
+4. Making necessary redundancy removing based on step 2, and necessary unlooping, loop distribution, loop interchanging, statement reordering based on step 3.
 5. Understand the pattern, then generate the actual vectorized code for the full loop range."""
     
     def vectorizer_agent(self, source_code, func_name, clang_analysis, feedback=None):
@@ -1009,8 +1011,11 @@ int main() {{
     def compiler_tester_agent(self, func_name, func_data, vectorized_code, iteration=1):
         """Test the vectorized code for correctness"""
         
-        # First check if the code is actually vectorized
-        is_vectorized, vec_message = self.check_if_vectorized(vectorized_code)
+        # Extract and clean the function first
+        vectorized_func = self.extract_and_clean_function(vectorized_code)
+        
+        # Then check if the extracted function is actually vectorized
+        is_vectorized, vec_message = self.check_if_vectorized(vectorized_func)
         if not is_vectorized:
             return {
                 'success': False,
@@ -1019,9 +1024,6 @@ int main() {{
                 'test_output': None,
                 'hint': 'The code does not contain vector intrinsics. Try to actually vectorize the loop.'
             }
-        
-        # Extract and clean the function
-        vectorized_func = self.extract_and_clean_function(vectorized_code)
         
         # Ensure correct function name
         if f'{func_name}_vectorized' not in vectorized_func:
