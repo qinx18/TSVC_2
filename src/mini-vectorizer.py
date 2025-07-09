@@ -273,6 +273,8 @@ class TSVCVectorizerExperiment:
                     category = 'control_flow'
                 elif 'statement reordering' in func_body:
                     category = 'statement_reordering'
+                elif 'loop distribution' in func_body:
+                    category = 'loop_distribution'
                 elif 'recurrences' in func_body:
                     category = 'recurrences'
                 elif 'if (' in func_body or 'condition' in func_body.lower():
@@ -553,7 +555,7 @@ When doing vectorization analysis, follow these steps:
 1. Simplify the case by setting the loop iterations to a small number. 
 2. Enumerate the process as the code written, identify which variable is refered as its original value and which one is refered as its updated value.
 3. Variables that use original values load operand directly from memory, then compute, then store the values. 
-   After that, variables that use updated value load from previous iterations, then compute, finally store the values.
+   After that, variables that use updated value load from memory, then compute, finally store the values.
 4. Making necessary unlooping/loop interchanging/statement reordering based on step 3.
 5. Understand the pattern, then generate the actual vectorized code for the full loop range."""
     
@@ -1298,7 +1300,7 @@ def main():
     experiment = TSVCVectorizerExperiment(api_key)
     
     # Test s126 function
-    experiment.run_experiment(functions_to_test=['s1213'])
+    experiment.run_experiment(functions_to_test=['s222'])
 
 if __name__ == "__main__":
     main()
