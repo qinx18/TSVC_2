@@ -12,8 +12,12 @@ def cleanup_workspace():
     """Clean up workspace before running vectorizer"""
     print("Starting cleanup...")
     
+    # Calculate workspace root relative to this script's location
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    workspace_dir = os.path.join(script_dir, '../..')
+    workspace_dir = os.path.abspath(workspace_dir)
+    
     # 1. Delete all .o files in workspace
-    workspace_dir = os.path.expanduser("~/workspace")
     o_files = glob.glob(os.path.join(workspace_dir, "**/*.o"), recursive=True)
     for o_file in o_files:
         try:
@@ -57,7 +61,7 @@ class TSVCVectorizerExperiment:
     def __init__(self, api_key):
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model = "claude-sonnet-4-20250514"
-        self.max_iterations = 10
+        self.max_iterations = 1
         self.temperature = 0.2  # Lower temperature for more consistent code generation
         self.results = {}
         
@@ -565,10 +569,10 @@ When doing vectorization analysis, follow these steps:
 2. When enumerating, recognize overwrittened assignments and calculations that cancled each other out, remove all these redundant operations,
    aware the edge cases at the beginning and the end.
 3. For the rest of operations, identify which element is refered as its original value and which one is refered as its updated value.
-4. Load original values directly from memory first, then compute variables that use original value, then store the values. 
-   After that, variables that use updated value load from memory, then compute, finally store the values.
-4. Making necessary redundancy removing based on step 2, and necessary unlooping, loop distribution, loop interchanging, statement reordering based on step 3.
-5. Understand the pattern, then generate the actual vectorized code for the full loop range."""
+4. Load original values(not updated if executing sequentially like a[i+1]) directly from memory first, then compute elements that use original values, then store these elements. 
+   After that, load the updated values from memory, then compute elements that use updated values, finally store these elements.
+5. Making necessary redundancy removing based on step 2, and necessary unlooping, loop distribution, loop interchanging, statement reordering based on step 3 & 4.
+6. Understand the pattern, then generate the actual vectorized code for the full loop range."""
     
     def vectorizer_agent(self, source_code, func_name, clang_analysis, feedback=None):
         """Generate vectorized code using Anthropic API"""
@@ -665,27 +669,203 @@ Output only the C function, no explanations."""
         # Only if no intrinsics found, then it's not vectorized
         return False, "No vector intrinsics found"
     
-    def create_test_harness(self, func_name):
-        """Create generic test harness for any TSVC function"""
-        # Check which arrays are used in the core loop
-        core_loop = self.test_functions[func_name]['core_loop']
+    def create_modified_tsvc(self, func_name, vectorized_func):
+        """Create a modified tsvc.c that includes both original and vectorized versions"""
+        print(f"DEBUG: Creating modified tsvc.c for {func_name}")
         
-        # Debug print
-        print(f"DEBUG: Creating test harness for {func_name}")
-        print(f"Core loop: {core_loop[:100]}...")
+        # Read the original tsvc.c
+        try:
+            with open('TSVC_2/src/tsvc.c', 'r') as f:
+                tsvc_content = f.read()
+        except FileNotFoundError:
+            try:
+                with open('tsvc.c', 'r') as f:
+                    tsvc_content = f.read()
+            except FileNotFoundError:
+                raise FileNotFoundError("tsvc.c file not found")
         
-        # Determine if we need 1D or 2D arrays based on what's in the loop
-        uses_2d = 'aa[' in core_loop or 'bb[' in core_loop or 'cc[' in core_loop
-        uses_1d = 'a[' in core_loop or 'b[' in core_loop or 'c[' in core_loop or 'd[' in core_loop or 'e[' in core_loop
+        # Read common.c for the dummy function
+        try:
+            with open('TSVC_2/src/common.c', 'r') as f:
+                common_content = f.read()
+        except FileNotFoundError:
+            try:
+                with open('common.c', 'r') as f:
+                    common_content = f.read()
+            except FileNotFoundError:
+                common_content = ""
         
-        print(f"Uses 2D arrays: {uses_2d}, Uses 1D arrays: {uses_1d}")
+        # Extract the dummy function from common.c if it exists
+        dummy_func = ""
+        if common_content:
+            import re
+            dummy_match = re.search(r'int dummy\([^{]*\{[^}]*\}', common_content, re.DOTALL)
+            if dummy_match:
+                dummy_func = dummy_match.group(0)
         
-        if uses_2d:
-            # 2D array test harness (even if it also uses 1D arrays)
-            return self._create_2d_test_harness(func_name)
-        else:
-            # 1D array test harness (default)
-            return self._create_1d_test_harness(func_name)
+        # If dummy function not found, create a simple one
+        if not dummy_func:
+            dummy_func = """int dummy(real_t a[LEN_1D], real_t b[LEN_1D], real_t c[LEN_1D], real_t d[LEN_1D], real_t e[LEN_1D],
+                     real_t aa[LEN_2D][LEN_2D], real_t bb[LEN_2D][LEN_2D], real_t cc[LEN_2D][LEN_2D], real_t s) {
+    return 0;
+}"""
+        
+        # Extract only the target function and remove all other test functions
+        original_func_pattern = rf'(real_t {func_name}\(struct args_t \* func_args\)\s*\{{.*?\n\}})'
+        original_match = re.search(original_func_pattern, tsvc_content, re.DOTALL)
+        
+        if not original_match:
+            raise ValueError(f"Original function {func_name} not found in tsvc.c")
+        
+        original_func = original_match.group(1)
+        
+        # Create vectorized wrapper that matches the original signature
+        vectorized_wrapper = f"""
+// Vectorized version of {func_name}
+{vectorized_func}
+
+real_t {func_name}_vectorized_wrapper(struct args_t * func_args)
+{{
+    initialise_arrays(__func__);
+    gettimeofday(&func_args->t1, NULL);
+    
+    for (int nl = 0; nl < iterations; nl++) {{
+        {func_name}_vectorized();
+        dummy(a, b, c, d, e, aa, bb, cc, 0.);
+    }}
+    
+    gettimeofday(&func_args->t2, NULL);
+    return calc_checksum("{func_name}");
+}}
+"""
+        
+        # Create a minimal tsvc.c with only the necessary components
+        minimal_tsvc = f"""
+/*
+ * This is an executable test containing a number of loops to measure
+ * the performance of a compiler. Arrays' length is LEN_1D by default
+ * and if you want a different array length, you should replace every
+ * LEN_1D by your desired number which must be a multiple of 40. If you
+ * want to increase the number of loop calls to have a longer run time
+ * you have to manipulate the constant value iterations. There is a dummy
+ * function called in each loop to make all computations appear required.
+ * The time to execute this function is included in the time measurement
+ * for the output but it is neglectable.
+ *
+ *  The output includes three columns:
+ *    Loop:        The name of the loop
+ *    Time(Sec):     The time in seconds to run the loop
+ *    Checksum:    The checksum calculated when the test has run
+ *
+ * In this version of the codelets arrays are static type.
+ *
+ * All functions/loops are taken from "TEST SUITE FOR VECTORIZING COMPILERS"
+ * by David Callahan, Jack Dongarra and David Levine except those whose
+ * functions' name have 4 digits.
+ */
+
+#include <time.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <sys/time.h>
+
+#include "common.h"
+#include "array_defs.h"
+#include <immintrin.h>
+
+
+// array definitions
+__attribute__((aligned(ARRAY_ALIGNMENT))) real_t flat_2d_array[LEN_2D*LEN_2D];
+
+__attribute__((aligned(ARRAY_ALIGNMENT))) real_t x[LEN_1D];
+
+__attribute__((aligned(ARRAY_ALIGNMENT))) real_t a[LEN_1D],b[LEN_1D],c[LEN_1D],d[LEN_1D],e[LEN_1D],
+                                   aa[LEN_2D][LEN_2D],bb[LEN_2D][LEN_2D],cc[LEN_2D][LEN_2D],tt[LEN_2D][LEN_2D];
+
+__attribute__((aligned(ARRAY_ALIGNMENT))) int indx[LEN_1D];
+
+real_t* __restrict__ xx;
+real_t* yy;
+
+{dummy_func}
+
+
+{original_func}
+{vectorized_wrapper}
+
+typedef real_t(*test_function_t)(struct args_t *);
+
+void time_function(test_function_t vector_func, void * arg_info)
+{{
+    struct args_t func_args = {{.arg_info=arg_info}};
+
+    double result = vector_func(&func_args);
+
+    double tic=func_args.t1.tv_sec+(func_args.t1.tv_usec/1000000.0);
+    double toc=func_args.t2.tv_sec+(func_args.t2.tv_usec/1000000.0);
+
+    double taken = toc-tic;
+
+    printf("%10.3f\\t%f\\n", taken, result);
+}}
+
+
+// Test function to compare original vs vectorized
+void test_{func_name}_comparison() {{
+    struct args_t func_args_orig = {{0}};
+    struct args_t func_args_vec = {{0}};
+    
+    printf("Testing {func_name}:\\n");
+    printf("Function\\tTime(sec)\\tChecksum\\n");
+    
+    // Test original version
+    real_t checksum_orig = {func_name}(&func_args_orig);
+    double time_orig = (func_args_orig.t2.tv_sec - func_args_orig.t1.tv_sec) +
+                      (func_args_orig.t2.tv_usec - func_args_orig.t1.tv_usec) / 1000000.0;
+    printf("{func_name}_orig\\t%10.6f\\t%f\\n", time_orig, checksum_orig);
+    
+    // Test vectorized version
+    real_t checksum_vec = {func_name}_vectorized_wrapper(&func_args_vec);
+    double time_vec = (func_args_vec.t2.tv_sec - func_args_vec.t1.tv_sec) +
+                     (func_args_vec.t2.tv_usec - func_args_vec.t1.tv_usec) / 1000000.0;
+    printf("{func_name}_vec\\t%10.6f\\t%f\\n", time_vec, checksum_vec);
+    
+    // Compare results
+    double checksum_diff = fabs(checksum_orig - checksum_vec);
+    double speedup = time_orig / time_vec;
+    
+    printf("\\nComparison Results:\\n");
+    printf("Checksum difference: %e\\n", checksum_diff);
+    printf("Speedup: %.2fx\\n", speedup);
+    
+    if (checksum_diff < 1e-5) {{
+        printf("CORRECTNESS: PASS\\n");
+    }} else {{
+        printf("CORRECTNESS: FAIL\\n");
+    }}
+    
+    if (speedup > 1.0) {{
+        printf("PERFORMANCE: IMPROVED\\n");
+    }} else {{
+        printf("PERFORMANCE: NO IMPROVEMENT\\n");
+    }}
+}}
+
+int main(int argc, char ** argv){{
+    int n1 = 1;
+    int n3 = 1;
+    int* ip;
+    real_t s1,s2;
+    init(&ip, &s1, &s2);
+    
+    test_{func_name}_comparison();
+    
+    return EXIT_SUCCESS;
+}}
+"""
+        
+        return minimal_tsvc
     
     def _detect_modified_arrays(self, func_name):
         """Detect which arrays are modified by analyzing the core loop"""
@@ -715,252 +895,9 @@ Output only the C function, no explanations."""
         print(f"DEBUG: Detected modified arrays for {func_name}: {modified_arrays}")
         return modified_arrays
     
-    def _create_1d_test_harness(self, func_name=None):
-        """Create test harness for functions using 1D arrays"""
-        # Determine which arrays are modified by analyzing the core loop
-        modified_arrays = self._detect_modified_arrays(func_name) if func_name else ['a']
-        
-        # Generate comparison code for all modified arrays
-        comparison_code = ""
-        for array in modified_arrays:
-            comparison_code += f"""
-    // Compare array '{array}'
-    for (int i = 0; i < LEN_1D; i++) {{
-        if (fabs({array}_original[i] - {array}_vectorized[i]) > 1e-5) {{
-            printf("Mismatch at {array}[%d]: original=%f, vectorized=%f\\\\n",
-                   i, {array}_original[i], {array}_vectorized[i]);
-            match = 0;
-        }}
-    }}"""
-        
-        # Generate copy operations for modified arrays after running functions
-        copy_after_original = ""
-        copy_after_vectorized = ""
-        for array in modified_arrays:
-            copy_after_original += f"    memcpy({array}_original, {array}, sizeof({array}));\n"
-            copy_after_vectorized += f"    memcpy({array}_vectorized, {array}, sizeof({array}));\n"
-        
-        return f"""
-#include <stdio.h>
-#include <stdlib.h>
-#include <immintrin.h>
-#include <math.h>
-#include <string.h>
-
-#define LEN_1D 32
-#define LEN_2D 16
-#define real_t float
-
-// Global arrays for testing
-__attribute__((aligned(32))) real_t a[LEN_1D];
-__attribute__((aligned(32))) real_t b[LEN_1D];
-__attribute__((aligned(32))) real_t c[LEN_1D];
-__attribute__((aligned(32))) real_t d[LEN_1D];
-__attribute__((aligned(32))) real_t e[LEN_1D];
-
-// Original implementation
-void FUNC_NAME_original() {{
-    CORE_LOOP_PLACEHOLDER
-}}
-
-// Vectorized function will be inserted here
-__VECTORIZED_CODE__
-
-int main() {{
-    // Initialize arrays with alternating positive/negative values
-    for (int i = 0; i < LEN_1D; i++) {{
-        int sign = (i % 2 == 0) ? 1 : -1;
-        a[i] = (real_t)(sign * i);
-        b[i] = (real_t)(sign * (i + 1));
-        c[i] = (real_t)(sign * (i + 2));
-        d[i] = (real_t)(sign * (i + 3));
-        e[i] = (real_t)(sign * (i + 4));
-    }}
+    # Removed old test harness creation methods - now using tsvc.c infrastructure
     
-    // Make copies for comparison
-    real_t a_original[LEN_1D], b_original[LEN_1D], c_original[LEN_1D];
-    real_t d_original[LEN_1D], e_original[LEN_1D];
-    real_t a_vectorized[LEN_1D], b_vectorized[LEN_1D], c_vectorized[LEN_1D];
-    real_t d_vectorized[LEN_1D], e_vectorized[LEN_1D];
-    
-    memcpy(a_original, a, sizeof(a));
-    memcpy(b_original, b, sizeof(b));
-    memcpy(c_original, c, sizeof(c));
-    memcpy(d_original, d, sizeof(d));
-    memcpy(e_original, e, sizeof(e));
-    
-    memcpy(a_vectorized, a, sizeof(a));
-    memcpy(b_vectorized, b, sizeof(b));
-    memcpy(c_vectorized, c, sizeof(c));
-    memcpy(d_vectorized, d, sizeof(d));
-    memcpy(e_vectorized, e, sizeof(e));
-    
-    // Run original
-    memcpy(a, a_original, sizeof(a));
-    memcpy(b, b_original, sizeof(b));
-    memcpy(c, c_original, sizeof(c));
-    memcpy(d, d_original, sizeof(d));
-    memcpy(e, e_original, sizeof(e));
-    FUNC_NAME_original();
-{copy_after_original}
-    // Run vectorized
-    memcpy(a, a_vectorized, sizeof(a));
-    memcpy(b, b_vectorized, sizeof(b));
-    memcpy(c, c_vectorized, sizeof(c));
-    memcpy(d, d_vectorized, sizeof(d));
-    memcpy(e, e_vectorized, sizeof(e));
-    FUNC_NAME_vectorized();
-{copy_after_vectorized}
-    // Compare results for all modified arrays
-    int match = 1;{comparison_code}
-    
-    if (match) {{
-        printf("SUCCESS\\\\n");
-        return 0;
-    }} else {{
-        return 1;
-    }}
-}}
-"""
-    
-    def _create_2d_test_harness(self, func_name):
-        """Create test harness for functions using 2D arrays"""
-        # Check if the core loop needs an outer loop context
-        core_loop = self.test_functions.get(func_name, {}).get('core_loop', '')
-        needs_outer_loop = 'j < i' in core_loop or ('i' in core_loop and 'for' in core_loop and 'int i' not in core_loop)
-        
-        # Check if flat_2d_array is used
-        uses_flat_array = 'flat_2d_array' in core_loop
-        
-        if needs_outer_loop:
-            loop_placeholder = """for (int i = 0; i < LEN_2D; i++) {
-        CORE_LOOP_PLACEHOLDER
-    }"""
-        else:
-            loop_placeholder = "CORE_LOOP_PLACEHOLDER"
-        
-        # Add flat_2d_array declaration if needed
-        flat_array_decl = ""
-        flat_array_init = ""
-        flat_array_copy = ""
-        flat_array_compare = ""
-        
-        if uses_flat_array:
-            flat_array_decl = "__attribute__((aligned(32))) real_t flat_2d_array[LEN_2D*LEN_2D];"
-            flat_array_init = """
-    // Initialize flat 2D array
-    for (int i = 0; i < LEN_2D*LEN_2D; i++) {
-        flat_2d_array[i] = (real_t)(i + 10);
-    }"""
-            flat_array_copy = """
-    // Make copies for flat array comparison
-    real_t flat_2d_array_original[LEN_2D*LEN_2D];
-    real_t flat_2d_array_vectorized[LEN_2D*LEN_2D];
-    
-    memcpy(flat_2d_array_original, flat_2d_array, sizeof(flat_2d_array));
-    memcpy(flat_2d_array_vectorized, flat_2d_array, sizeof(flat_2d_array));
-    
-    // Run original with flat array
-    memcpy(flat_2d_array, flat_2d_array_original, sizeof(flat_2d_array));"""
-            
-            flat_array_compare = """
-    // Also compare flat array if it was modified
-    for (int i = 0; i < LEN_2D*LEN_2D; i++) {
-        if (fabs(flat_2d_array_original[i] - flat_2d_array_vectorized[i]) > 1e-5) {
-            printf("Mismatch at flat_2d_array[%d]: original=%f, vectorized=%f\\n",
-                   i, flat_2d_array_original[i], flat_2d_array_vectorized[i]);
-            match = 0;
-        }
-    }"""
-        
-        return f"""
-#include <stdio.h>
-#include <stdlib.h>
-#include <immintrin.h>
-#include <math.h>
-#include <string.h>
-
-#define LEN_1D 32
-#define LEN_2D 16
-#define real_t float
-
-// Global arrays for testing - both 1D and 2D
-__attribute__((aligned(32))) real_t a[LEN_1D];
-__attribute__((aligned(32))) real_t b[LEN_1D];
-__attribute__((aligned(32))) real_t c[LEN_1D];
-__attribute__((aligned(32))) real_t d[LEN_1D];
-__attribute__((aligned(32))) real_t e[LEN_1D];
-__attribute__((aligned(32))) real_t aa[LEN_2D][LEN_2D];
-__attribute__((aligned(32))) real_t bb[LEN_2D][LEN_2D];
-__attribute__((aligned(32))) real_t cc[LEN_2D][LEN_2D];
-{flat_array_decl}
-
-// Original implementation
-void FUNC_NAME_original() {{
-    {loop_placeholder}
-}}
-
-// Vectorized function will be inserted here
-__VECTORIZED_CODE__
-
-int main() {{
-    // Initialize 1D arrays with alternating positive/negative values
-    for (int i = 0; i < LEN_1D; i++) {{
-        int sign = (i % 2 == 0) ? 1 : -1;
-        a[i] = (real_t)(sign * i);
-        b[i] = (real_t)(sign * (i + 1));
-        c[i] = (real_t)(sign * (i + 2));
-        d[i] = (real_t)(sign * (i + 3));
-        e[i] = (real_t)(sign * (i + 4));
-    }}
-    
-    // Initialize 2D arrays with alternating positive/negative values
-    for (int i = 0; i < LEN_2D; i++) {{
-        for (int j = 0; j < LEN_2D; j++) {{
-            int sign = ((i + j) % 2 == 0) ? 1 : -1;
-            aa[i][j] = (real_t)(sign * (i * LEN_2D + j));
-            bb[i][j] = (real_t)(sign * (i + j * 2 + 1));
-            cc[i][j] = (real_t)(sign * (i - j + 2));
-        }}
-    }}{flat_array_init}
-    
-    // Make copies for comparison (2D arrays)
-    real_t bb_original[LEN_2D][LEN_2D];
-    real_t bb_vectorized[LEN_2D][LEN_2D];
-    
-    memcpy(bb_original, bb, sizeof(bb));
-    memcpy(bb_vectorized, bb, sizeof(bb));{flat_array_copy}
-    
-    // Run original
-    memcpy(bb, bb_original, sizeof(bb));
-    FUNC_NAME_original();
-    memcpy(bb_original, bb, sizeof(bb));
-    
-    // Run vectorized
-    memcpy(bb, bb_vectorized, sizeof(bb));
-    FUNC_NAME_vectorized();
-    memcpy(bb_vectorized, bb, sizeof(bb));
-    
-    // Compare results (bb array is typically the output for these functions)
-    int match = 1;
-    for (int i = 0; i < LEN_2D; i++) {{
-        for (int j = 0; j < LEN_2D; j++) {{
-            if (fabs(bb_original[i][j] - bb_vectorized[i][j]) > 1e-5) {{
-                printf("Mismatch at bb[%d][%d]: original=%f, vectorized=%f\\n",
-                       i, j, bb_original[i][j], bb_vectorized[i][j]);
-                match = 0;
-            }}
-        }}
-    }}{flat_array_compare}
-    
-    if (match) {{
-        printf("SUCCESS\\n");
-        return 0;
-    }} else {{
-        return 1;
-    }}
-}}
-"""
+    # Removed old test harness creation methods - now using tsvc.c infrastructure
     
     def extract_and_clean_function(self, vectorized_code):
         """Extract and clean the function from LLM response"""
@@ -1009,7 +946,7 @@ int main() {{
         return vectorized_func
     
     def compiler_tester_agent(self, func_name, func_data, vectorized_code, iteration=1):
-        """Test the vectorized code for correctness"""
+        """Test the vectorized code using the modified tsvc.c framework"""
         
         # Extract and clean the function first
         vectorized_func = self.extract_and_clean_function(vectorized_code)
@@ -1022,85 +959,115 @@ int main() {{
                 'error_type': 'not_vectorized',
                 'error_message': vec_message,
                 'test_output': None,
-                'hint': 'The code does not contain vector intrinsics. Try to actually vectorize the loop.'
+                'hint': 'The code does not contain vector intrinsics. Try to actually vectorize the loop.',
+                'performance_data': None
             }
         
         # Ensure correct function name
         if f'{func_name}_vectorized' not in vectorized_func:
             vectorized_func = re.sub(r'void\s+\w+\s*\(', f'void {func_name}_vectorized(', vectorized_func)
         
-        # Create test harness
-        test_template = self.create_test_harness(func_name)
+        # Create modified tsvc.c with both original and vectorized versions
+        try:
+            modified_tsvc_content = self.create_modified_tsvc(func_name, vectorized_func)
+        except Exception as e:
+            return {
+                'success': False,
+                'error_type': 'tsvc_modification',
+                'error_message': f'Failed to create modified tsvc.c: {str(e)}',
+                'test_output': None,
+                'hint': 'Check if tsvc.c and common.c files are accessible',
+                'performance_data': None
+            }
         
-        # For nested loops, we need special handling
-        core_loop = func_data['core_loop']
-        if 'j < i' in core_loop or ('i' in core_loop and 'for' in core_loop and 'int i' not in core_loop):
-            # This is an inner loop that needs outer context
-            # The template already has the outer loop, so just replace the inner part
-            test_code = test_template.replace('FUNC_NAME', func_name)
-            test_code = test_code.replace('CORE_LOOP_PLACEHOLDER', core_loop.strip())
-        else:
-            # Normal replacement
-            test_code = test_template.replace('FUNC_NAME', func_name)
-            test_code = test_code.replace('CORE_LOOP_PLACEHOLDER', core_loop)
+        # Save files for debugging - create in workspace root directory
+        # The script is in TSVC_2/src/, so workspace root is two levels up
+        workspace_root = os.path.join(os.path.dirname(__file__), '../..')
+        workspace_root = os.path.abspath(workspace_root)
+        attempts_dir = os.path.join(workspace_root, f"tsvc_vectorized_attempts/{func_name}")
+        os.makedirs(attempts_dir, exist_ok=True)
         
-        test_code = test_code.replace('__VECTORIZED_CODE__', vectorized_func)
+        # Save the modified tsvc.c
+        modified_tsvc_path = os.path.join(attempts_dir, f"modified_tsvc_{iteration}.c")
+        with open(modified_tsvc_path, 'w') as f:
+            f.write(modified_tsvc_content)
         
-        # Save files for debugging
-        os.makedirs(f"tsvc_vectorized_attempts/{func_name}", exist_ok=True)
-        
-        with open(f"tsvc_vectorized_attempts/{func_name}/test_harness.c", 'w') as f:
-            f.write(test_code)
-        
-        with open(f"tsvc_vectorized_attempts/{func_name}/extracted_function_{iteration}.c", 'w') as f:
+        # Save the extracted vectorized function
+        with open(os.path.join(attempts_dir, f"extracted_function_{iteration}.c"), 'w') as f:
             f.write(vectorized_func)
         
-        # Compile and test
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.c', delete=False) as f:
-            f.write(test_code)
-            temp_file = f.name
+        # Don't copy files - use original ones from src directory
+        test_dir = attempts_dir
         
+        # Compile the modified tsvc.c using original files from src directory
+        exe_file = os.path.join(attempts_dir, f"test_executable_{iteration}")
+        # Get the absolute path to the src directory for headers and source files
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        src_dir = script_dir  # Script is in the src directory
+        common_c_path = os.path.join(src_dir, 'common.c')
+        
+        compile_result = subprocess.run([
+            'gcc',
+            '-mavx2',
+            '-mfma',
+            '-lm',
+            '-O2',
+            '-I', src_dir,  # Use src directory for headers
+            '-o', exe_file,
+            modified_tsvc_path,
+            common_c_path  # Full path to common.c
+        ], capture_output=True, text=True, cwd=src_dir)
+        
+        if compile_result.returncode != 0:
+            return {
+                'success': False,
+                'error_type': 'compilation',
+                'error_message': compile_result.stderr,
+                'test_output': None,
+                'hint': 'Check syntax, missing headers, or incorrect intrinsic usage',
+                'performance_data': None
+            }
+        
+        # Run the test
         try:
-            # Compile
-            exe_file = temp_file.replace('.c', '')
-            compile_result = subprocess.run(
-                ['gcc', '-mavx2', '-mfma', '-lm', '-o', exe_file, temp_file],
-                capture_output=True, text=True
-            )
-            
-            if compile_result.returncode != 0:
-                return {
-                    'success': False,
-                    'error_type': 'compilation',
-                    'error_message': compile_result.stderr,
-                    'test_output': None,
-                    'hint': 'Check syntax, missing headers, or incorrect intrinsic usage'
-                }
-            
-            # Run test
             run_result = subprocess.run(
-                [exe_file], 
-                capture_output=True, 
+                [exe_file],
+                capture_output=True,
                 text=True,
-                timeout=5
+                timeout=10,
+                cwd=src_dir
             )
             
-            if run_result.returncode == 0:
+            # Parse the output to extract performance data
+            performance_data = self.parse_performance_output(run_result.stdout)
+            
+            # Check if the test passed based on correctness
+            if "CORRECTNESS: PASS" in run_result.stdout:
                 return {
                     'success': True,
                     'error_type': None,
                     'error_message': None,
-                    'test_output': run_result.stdout
+                    'test_output': run_result.stdout,
+                    'performance_data': performance_data
                 }
-            else:
-                # Analyze the error
-                hint = self.analyze_error(run_result.stdout, func_name)
+            elif "CORRECTNESS: FAIL" in run_result.stdout:
                 return {
                     'success': False,
                     'error_type': 'correctness',
-                    'error_message': 'Output mismatch',
+                    'error_message': 'Checksum mismatch between original and vectorized versions',
                     'test_output': run_result.stdout,
-                    'hint': hint
+                    'hint': self.analyze_tsvc_error(run_result.stdout, func_name),
+                    'performance_data': performance_data
+                }
+            else:
+                # Execution completed but no clear pass/fail indication
+                return {
+                    'success': False,
+                    'error_type': 'execution',
+                    'error_message': 'Test execution completed but results unclear',
+                    'test_output': run_result.stdout,
+                    'hint': 'Check the test output for runtime errors',
+                    'performance_data': performance_data
                 }
                 
         except subprocess.TimeoutExpired:
@@ -1109,36 +1076,113 @@ int main() {{
                 'error_type': 'timeout',
                 'error_message': 'Execution timeout',
                 'test_output': None,
-                'hint': 'Possible infinite loop in vectorized code'
+                'hint': 'Possible infinite loop in vectorized code',
+                'performance_data': None
             }
-        finally:
-            # Cleanup
-            for file_path in [temp_file, exe_file]:
-                if os.path.exists(file_path):
-                    os.unlink(file_path)
+        except Exception as e:
+            return {
+                'success': False,
+                'error_type': 'execution',
+                'error_message': f'Execution failed: {str(e)}',
+                'test_output': None,
+                'hint': 'Check for runtime errors or missing dependencies',
+                'performance_data': None
+            }
     
-    def analyze_error(self, error_output, func_name):
-        """Analyze test output to provide hints"""
-        # For correctness errors, the output shows mismatches
-        if "Mismatch" in error_output:
-            # Extract some mismatch details
-            mismatch_lines = [line for line in error_output.split('\n') if 'Mismatch' in line][:3]
-            mismatch_info = '\n'.join(mismatch_lines)
-            return f"The vectorized version produces different results:\n{mismatch_info}"
+    def parse_performance_output(self, output):
+        """Parse the performance output from the modified tsvc.c"""
+        performance_data = {
+            'original_time': None,
+            'vectorized_time': None,
+            'original_checksum': None,
+            'vectorized_checksum': None,
+            'speedup': None,
+            'checksum_diff': None
+        }
+        
+        import re
+        
+        # Parse timing and checksum data
+        lines = output.split('\n')
+        for line in lines:
+            if '_orig' in line:
+                # Parse original function results
+                parts = line.split('\t')
+                if len(parts) >= 3:
+                    try:
+                        performance_data['original_time'] = float(parts[1])
+                        performance_data['original_checksum'] = float(parts[2])
+                    except ValueError:
+                        pass
+            elif '_vec' in line:
+                # Parse vectorized function results
+                parts = line.split('\t')
+                if len(parts) >= 3:
+                    try:
+                        performance_data['vectorized_time'] = float(parts[1])
+                        performance_data['vectorized_checksum'] = float(parts[2])
+                    except ValueError:
+                        pass
+            elif 'Speedup:' in line:
+                # Parse speedup
+                match = re.search(r'Speedup: ([\d.]+)x', line)
+                if match:
+                    performance_data['speedup'] = float(match.group(1))
+            elif 'Checksum difference:' in line:
+                # Parse checksum difference (handle scientific notation with + sign)
+                match = re.search(r'Checksum difference: ([\d.e+-]+)', line)
+                if match:
+                    performance_data['checksum_diff'] = float(match.group(1))
+        
+        return performance_data
+    
+    def analyze_tsvc_error(self, error_output, func_name):
+        """Analyze TSVC-specific test output to provide hints"""
+        if "CORRECTNESS: FAIL" in error_output:
+            # Extract checksum difference
+            import re
+            diff_match = re.search(r'Checksum difference: ([\d.e+-]+)', error_output)
+            if diff_match:
+                diff_value = float(diff_match.group(1))
+                if diff_value > 1e-3:
+                    return f"Large checksum difference ({diff_value:.2e}). The vectorized version likely has a logic error."
+                else:
+                    return f"Small checksum difference ({diff_value:.2e}). May be due to floating-point precision differences."
+            else:
+                return "Checksum mismatch detected. The vectorized version produces different results than the original."
         
         elif "Segmentation fault" in error_output:
             return "Memory access error. Check array bounds in vector operations."
         
+        elif "Compilation failed" in error_output:
+            return "Compilation error. Check syntax and intrinsic usage."
+        
         else:
-            # Generic hint - just show what went wrong
-            return f"Test failed with output:\n{error_output[:200]}"
+            # Generic hint - show relevant parts of the output
+            relevant_lines = []
+            for line in error_output.split('\n'):
+                if any(keyword in line.lower() for keyword in ['error', 'fail', 'mismatch', 'abort']):
+                    relevant_lines.append(line)
+            
+            if relevant_lines:
+                return f"Test failed with errors:\n" + '\n'.join(relevant_lines[:3])
+            else:
+                return f"Test failed with output:\n{error_output[:200]}"
+
+    def analyze_error(self, error_output, func_name):
+        """Legacy method - redirect to analyze_tsvc_error"""
+        return self.analyze_tsvc_error(error_output, func_name)
     
     def save_iteration_data(self, func_name, iteration, vectorized_code, source_code, feedback, clang_report):
         """Save all data from this iteration for debugging"""
-        os.makedirs(f"tsvc_vectorized_attempts/{func_name}", exist_ok=True)
+        # Calculate workspace root consistently
+        workspace_root = os.path.join(os.path.dirname(__file__), '../..')
+        workspace_root = os.path.abspath(workspace_root)
+        attempts_dir = os.path.join(workspace_root, f"tsvc_vectorized_attempts/{func_name}")
+        os.makedirs(attempts_dir, exist_ok=True)
         
         # Save LLM response
-        with open(f"tsvc_vectorized_attempts/{func_name}/attempt_{iteration}.c", 'w') as f:
+        with open(os.path.join(attempts_dir, f"attempt_{iteration}.c"), 'w') as f:
             f.write(vectorized_code)
         
         # Build the complete prompt that was sent to LLM
@@ -1185,7 +1229,7 @@ Here's what you tried before:
 """
         
         # Save the complete prompt
-        with open(f"tsvc_vectorized_attempts/{func_name}/prompt_{iteration}.txt", 'w') as f:
+        with open(os.path.join(attempts_dir, f"prompt_{iteration}.txt"), 'w') as f:
             f.write(f"Iteration {iteration} Prompt\n{'='*50}\n\n")
             f.write(f"SYSTEM PROMPT:\n{'-'*50}\n{system_prompt}\n\n")
             f.write(f"USER PROMPT:\n{'-'*50}\n{user_prompt}\n")
@@ -1274,6 +1318,10 @@ Here's what you tried before:
         if functions_to_test is None:
             functions_to_test = ['s114']
         
+        # Calculate workspace root for consistent file placement
+        workspace_root = os.path.join(os.path.dirname(__file__), '../..')
+        workspace_root = os.path.abspath(workspace_root)
+        
         # Extract the test functions first
         self.test_functions = self.extract_tsvc_functions(functions_to_test)
         
@@ -1297,9 +1345,10 @@ Here's what you tried before:
             if result['success']:
                 category_stats[category]['success'] += 1
             
-            # Save results
-            os.makedirs('tsvc_results', exist_ok=True)
-            with open(f'tsvc_results/{func_name}.json', 'w') as f:
+            # Save results in workspace root
+            results_dir = os.path.join(workspace_root, 'tsvc_results')
+            os.makedirs(results_dir, exist_ok=True)
+            with open(os.path.join(results_dir, f'{func_name}.json'), 'w') as f:
                 json.dump(result, f, indent=2)
             
             time.sleep(1)  # Rate limiting
@@ -1307,8 +1356,9 @@ Here's what you tried before:
         # Print summary
         self.print_summary(results, category_stats)
         
-        # Save all results
-        with open('tsvc_vectorization_results.json', 'w') as f:
+        # Save all results in workspace root
+        results_file = os.path.join(workspace_root, 'tsvc_vectorization_results.json')
+        with open(results_file, 'w') as f:
             json.dump({
                 'experiment': 'TSVC_vectorization_with_anthropic',
                 'model': self.model,
@@ -1353,7 +1403,7 @@ def main():
     experiment = TSVCVectorizerExperiment(api_key)
     
     # Test s126 function
-    experiment.run_experiment(functions_to_test=['s244'])
+    experiment.run_experiment(functions_to_test=['s1244'])
 
 if __name__ == "__main__":
     main()
