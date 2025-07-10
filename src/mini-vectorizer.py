@@ -61,7 +61,7 @@ class TSVCVectorizerExperiment:
     def __init__(self, api_key):
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model = "claude-sonnet-4-20250514"
-        self.max_iterations = 1
+        self.max_iterations = 2
         self.temperature = 0.2  # Lower temperature for more consistent code generation
         self.results = {}
         
@@ -1105,23 +1105,29 @@ int main(int argc, char ** argv){{
         # Parse timing and checksum data
         lines = output.split('\n')
         for line in lines:
-            if '_orig' in line:
-                # Parse original function results
+            if '_orig' in line and '\t' in line:
+                # Parse original function results: s1244	s1244_orig	  4.158379	159997.000000
                 parts = line.split('\t')
-                if len(parts) >= 3:
+                if len(parts) >= 4:
                     try:
-                        performance_data['original_time'] = float(parts[1])
-                        performance_data['original_checksum'] = float(parts[2])
-                    except ValueError:
+                        # The format is: function_name	function_name_orig	time	checksum
+                        time_str = parts[2].strip()
+                        checksum_str = parts[3].strip()
+                        performance_data['original_time'] = float(time_str)
+                        performance_data['original_checksum'] = float(checksum_str)
+                    except (ValueError, IndexError):
                         pass
-            elif '_vec' in line:
-                # Parse vectorized function results
+            elif '_vec' in line and '\t' in line:
+                # Parse vectorized function results: s1244_vectorized_wrapper	s1244_vec	  0.616577	160000.000000
                 parts = line.split('\t')
-                if len(parts) >= 3:
+                if len(parts) >= 4:
                     try:
-                        performance_data['vectorized_time'] = float(parts[1])
-                        performance_data['vectorized_checksum'] = float(parts[2])
-                    except ValueError:
+                        # The format is: function_name_wrapper	function_name_vec	time	checksum
+                        time_str = parts[2].strip()
+                        checksum_str = parts[3].strip()
+                        performance_data['vectorized_time'] = float(time_str)
+                        performance_data['vectorized_checksum'] = float(checksum_str)
+                    except (ValueError, IndexError):
                         pass
             elif 'Speedup:' in line:
                 # Parse speedup
@@ -1280,11 +1286,29 @@ Here's what you tried before:
                 'iteration': iteration,
                 'success': test_result['success'],
                 'error_type': test_result['error_type'],
-                'vectorized_code': vectorized_code
+                'vectorized_code': vectorized_code,
+                'performance_data': test_result.get('performance_data'),
+                'test_output': test_result.get('test_output'),
+                'error_message': test_result.get('error_message'),
+                'hint': test_result.get('hint')
             })
             
             if test_result['success']:
                 print(f"  ✓ SUCCESS! Correct vectorization achieved.")
+                # Print performance data if available
+                if test_result.get('performance_data'):
+                    perf = test_result['performance_data']
+                    print(f"  - Performance Results:")
+                    if perf.get('original_time') and perf.get('vectorized_time'):
+                        print(f"    Original time: {perf['original_time']:.6f}s")
+                        print(f"    Vectorized time: {perf['vectorized_time']:.6f}s")
+                    if perf.get('speedup'):
+                        print(f"    Speedup: {perf['speedup']:.2f}x")
+                    if perf.get('checksum_diff') is not None:
+                        print(f"    Checksum difference: {perf['checksum_diff']:.2e}")
+                    if perf.get('original_checksum') and perf.get('vectorized_checksum'):
+                        print(f"    Original checksum: {perf['original_checksum']:.1f}")
+                        print(f"    Vectorized checksum: {perf['vectorized_checksum']:.1f}")
                 break
             else:
                 print(f"  ✗ FAILED: {test_result['error_type']}")
@@ -1297,6 +1321,20 @@ Here's what you tried before:
                 # For correctness errors, test_output and hint are repetitive, so only show test_output
                 if test_result['error_type'] != 'correctness':
                     print(f"  - Hint: {test_result['hint']}")
+                # Print performance data even for failed tests if available
+                if test_result.get('performance_data'):
+                    perf = test_result['performance_data']
+                    print(f"  - Performance Data:")
+                    if perf.get('original_time') and perf.get('vectorized_time'):
+                        print(f"    Original time: {perf['original_time']:.6f}s")
+                        print(f"    Vectorized time: {perf['vectorized_time']:.6f}s")
+                    if perf.get('speedup'):
+                        print(f"    Speedup: {perf['speedup']:.2f}x")
+                    if perf.get('checksum_diff') is not None:
+                        print(f"    Checksum difference: {perf['checksum_diff']:.2e}")
+                    if perf.get('original_checksum') and perf.get('vectorized_checksum'):
+                        print(f"    Original checksum: {perf['original_checksum']:.1f}")
+                        print(f"    Vectorized checksum: {perf['vectorized_checksum']:.1f}")
                 
                 # Prepare feedback for next iteration
                 feedback = test_result
@@ -1309,6 +1347,7 @@ Here's what you tried before:
             'clang_analysis': clang_report,
             'total_iterations': len(attempts),
             'success': attempts[-1]['success'] if attempts else False,
+            'final_performance_data': attempts[-1].get('performance_data') if attempts else None,
             'attempts': attempts
         }
     
@@ -1384,7 +1423,12 @@ Here's what you tried before:
         print("\nBy Function:")
         for result in results:
             status = "SUCCESS" if result['success'] else "FAILED"
-            print(f"  {result['function']:6s} ({result['category']}): {status} after {result['total_iterations']} iterations")
+            perf_info = ""
+            if result.get('final_performance_data'):
+                perf = result['final_performance_data']
+                if perf.get('speedup'):
+                    perf_info = f" (Speedup: {perf['speedup']:.2f}x)"
+            print(f"  {result['function']:6s} ({result['category']}): {status} after {result['total_iterations']} iterations{perf_info}")
         
         # By category
         print("\nBy Category:")
@@ -1403,7 +1447,7 @@ def main():
     experiment = TSVCVectorizerExperiment(api_key)
     
     # Test s126 function
-    experiment.run_experiment(functions_to_test=['s1244'])
+    experiment.run_experiment(functions_to_test=['s2251'])
 
 if __name__ == "__main__":
     main()
