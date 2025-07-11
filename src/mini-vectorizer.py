@@ -1,6 +1,5 @@
 import anthropic
 import subprocess
-import tempfile
 import os
 import json
 import time
@@ -10,8 +9,6 @@ import shutil
 
 def cleanup_workspace():
     """Clean up workspace before running vectorizer"""
-    print("Starting cleanup...")
-    
     # Calculate workspace root relative to this script's location
     script_dir = os.path.dirname(os.path.abspath(__file__))
     workspace_dir = os.path.join(script_dir, '../..')
@@ -22,9 +19,8 @@ def cleanup_workspace():
     for o_file in o_files:
         try:
             os.remove(o_file)
-            print(f"Deleted: {o_file}")
-        except OSError as e:
-            print(f"Error deleting {o_file}: {e}")
+        except OSError:
+            pass
     
     # 2. Clean tsvc_results directory
     tsvc_results_dir = os.path.join(workspace_dir, "tsvc_results")
@@ -32,9 +28,8 @@ def cleanup_workspace():
         try:
             shutil.rmtree(tsvc_results_dir)
             os.makedirs(tsvc_results_dir)
-            print(f"Cleaned directory: {tsvc_results_dir}")
-        except OSError as e:
-            print(f"Error cleaning {tsvc_results_dir}: {e}")
+        except OSError:
+            pass
     
     # 3. Clean tsvc_vectorized_attempts directory
     tsvc_attempts_dir = os.path.join(workspace_dir, "tsvc_vectorized_attempts")
@@ -42,20 +37,16 @@ def cleanup_workspace():
         try:
             shutil.rmtree(tsvc_attempts_dir)
             os.makedirs(tsvc_attempts_dir)
-            print(f"Cleaned directory: {tsvc_attempts_dir}")
-        except OSError as e:
-            print(f"Error cleaning {tsvc_attempts_dir}: {e}")
+        except OSError:
+            pass
     
     # 4. Delete tsvc_vectorization_results.json file
     results_file = os.path.join(workspace_dir, "tsvc_vectorization_results.json")
     if os.path.exists(results_file):
         try:
             os.remove(results_file)
-            print(f"Deleted: {results_file}")
-        except OSError as e:
-            print(f"Error deleting {results_file}: {e}")
-    
-    print("Cleanup completed.\n")
+        except OSError:
+            pass
 
 class TSVCVectorizerExperiment:
     def __init__(self, api_key):
@@ -69,10 +60,7 @@ class TSVCVectorizerExperiment:
         self.test_functions = {}
     
     def extract_tsvc_functions(self, function_names=None):
-        """Extract function code from tsvc.c file"""
-        if function_names is None:
-            function_names = ['s114']  # Default to s114 only
-        
+        """Extract function code from tsvc.c file"""       
         functions = {}
         
         # Read tsvc.c file
@@ -101,11 +89,6 @@ class TSVCVectorizerExperiment:
                 full_function = f"real_t {func_name}(struct args_t * func_args)\n{{\n{func_match.group(1)}\n}}"
                 func_body = func_match.group(1)
                 
-                # Debug: print function body
-                print(f"\nDEBUG: Function body for {func_name}:")
-                print("=" * 50)
-                print(func_body[:500] + "..." if len(func_body) > 500 else func_body)
-                print("=" * 50)
                 
                 # Find ALL for loops, including nested ones
                 # Use regex to find all for loop headers - handle nested parentheses
@@ -142,9 +125,6 @@ class TSVCVectorizerExperiment:
                                 break
                         pos += 1
                 
-                print(f"\nDEBUG: Found {len(all_for_headers)} for loop headers:")
-                for h in all_for_headers:
-                    print(f"  {h['header']}")
                 
                 # Now extract complete loops
                 loops = []
@@ -177,7 +157,6 @@ class TSVCVectorizerExperiment:
                                     break
                             i += 1
                 
-                print(f"\nDEBUG: Extracted {len(loops)} complete loops")
                 
                 # Now find the computational loop
                 # For nested structures (like s114), we want the complete nested structure
@@ -209,9 +188,7 @@ class TSVCVectorizerExperiment:
                             has_function_calls = re.search(r'\b(?!dummy|gettimeofday|printf|initialise_arrays|calc_checksum)\w+\s*\([^)]*\)', loop['text'])
                             if has_function_calls:
                                 computational_loops.append(loop)
-                                print(f"\nDEBUG: Including 'nl' loop as computational loop due to function calls")
                 
-                print(f"\nDEBUG: Found {len(computational_loops)} computational loops")
                 
                 if computational_loops:
                     # For nested loops, we want the outermost computational loop
@@ -228,19 +205,15 @@ class TSVCVectorizerExperiment:
                         if all_nested:
                             # Use the outermost computational loop (contains all nested ones)
                             core_loop = outermost['text']
-                            print(f"\nDEBUG: Selected outermost computational loop (nested structure)")
                         else:
                             # Not all nested, pick the last one (likely the innermost)
                             core_loop = computational_loops[-1]['text']
-                            print(f"\nDEBUG: Selected last computational loop")
                     else:
                         # Single computational loop
                         core_loop = computational_loops[0]['text']
-                        print(f"\nDEBUG: Selected single computational loop")
                 
                 if not core_loop:
                     core_loop = "// No computational loop found"
-                    print("\nDEBUG: No computational loop found!")
                 
                 # Add missing variable declarations to the core loop
                 if core_loop and core_loop != "// No computational loop found":
@@ -275,38 +248,14 @@ class TSVCVectorizerExperiment:
                     
                     core_loop = '\n'.join(cleaned_lines)
                 
-                # Determine category based on comments and code patterns
-                category = 'unknown'
-                if 'nonlinear dependence' in func_body:
-                    category = 'nonlinear_dependence'
-                elif 'linear dependence' in func_body:
-                    category = 'linear_dependence'
-                elif 'induction variable' in func_body:
-                    category = 'induction variable recognition'
-                elif 'control flow' in func_body:
-                    category = 'control_flow'
-                elif 'statement reordering' in func_body:
-                    category = 'statement_reordering'
-                elif 'loop distribution' in func_body:
-                    category = 'loop_distribution'
-                elif 'recurrences' in func_body:
-                    category = 'recurrences'
-                elif 'if (' in func_body or 'condition' in func_body.lower():
-                    category = 'condition'
-                
                 functions[func_name] = {
                     'code': full_function,
-                    'core_loop': core_loop,
-                    'category': category
+                    'core_loop': core_loop
                 }
                 
-                # Final output
-                print(f"\nExtracted core loop for {func_name}:")
-                print(core_loop)
-                print()
                 
             else:
-                print(f"Function {func_name} not found in tsvc.c")
+                pass  # Function not found
         
         return functions
     
@@ -435,7 +384,6 @@ class TSVCVectorizerExperiment:
         for var in all_vars:
             # Look for variable declarations or initializations
             decl_pattern1 = rf'\b(int|real_t|float)\s+{var}\s*(?:=\s*[^;]+)?;'
-            decl_pattern2 = rf'\b{var}\s*=\s*([^;]+);'
             
             # Find declaration type
             func_decl_match = re.search(decl_pattern1, func_body)
@@ -522,131 +470,19 @@ class TSVCVectorizerExperiment:
         
         return result
     
-    def get_clang_vectorization_report(self, func_name, source_code):
-        """Get Clang's vectorization analysis report"""
-        import re
-        
-        # Extract just the core loop for analysis
-        core_loop = self.test_functions[func_name]['core_loop']
-        
-        # Check if the loop has dependencies on outer variables (like 'i' in inner loops)
-        # Look for common patterns like "j < i" or array accesses with 'i'
-        has_outer_dependency = False
-        if re.search(r'\b[ij]\s*<\s*[ij]\b', core_loop) and 'for' in core_loop:
-            # This looks like an inner loop depending on outer loop variable
-            has_outer_dependency = True
-        
-        # Check if flat_2d_array is used
-        uses_flat_array = 'flat_2d_array' in core_loop
-        
-        # Add flat_2d_array declaration if needed
-        flat_array_decl = ""
-        if uses_flat_array:
-            flat_array_decl = "real_t flat_2d_array[LEN_2D*LEN_2D];"
-        
-        # Build test program
-        if has_outer_dependency:
-            # Wrap in a dummy outer loop
-            test_program = f"""
-#include <stdio.h>
-
-#define LEN_1D 32000
-#define LEN_2D 256
-typedef float real_t;
-
-// Global arrays
-real_t a[LEN_1D], b[LEN_1D];
-real_t aa[LEN_2D][LEN_2D], bb[LEN_2D][LEN_2D], cc[LEN_2D][LEN_2D];
-{flat_array_decl}
-
-void test_function() {{
-    // Dummy outer loop for context
-    for (int i = 0; i < LEN_2D; i++) {{
-        {core_loop}
-    }}
-}}
-
-int main() {{
-    return 0;
-}}
-"""
-        else:
-            # Single loop or self-contained nested loop
-            test_program = f"""
-#include <stdio.h>
-
-#define LEN_1D 32000
-#define LEN_2D 256
-typedef float real_t;
-
-// Global arrays
-real_t a[LEN_1D], b[LEN_1D], c[LEN_1D], d[LEN_1D], e[LEN_1D];
-real_t aa[LEN_2D][LEN_2D], bb[LEN_2D][LEN_2D], cc[LEN_2D][LEN_2D];
-{flat_array_decl}
-
-void test_function() {{
-    {core_loop}
-}}
-
-int main() {{
-    return 0;
-}}
-"""
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.c', delete=False) as f:
-            f.write(test_program)
-            temp_file = f.name
-        
-        try:
-            # Run Clang with vectorization report flags
-            result = subprocess.run([
-                'clang',
-                '-O3',
-                '-mavx2',
-                '-Rpass-analysis=loop-vectorize',
-                '-Rpass-missed=loop-vectorize',
-                '-fvectorize',
-                '-c',
-                temp_file
-            ], capture_output=True, text=True)
-            
-            # Get the report
-            report = result.stderr
-            
-            # If compilation failed, return simple analysis
-            if result.returncode != 0:
-                print(f"Clang compilation failed:\n{report}")
-                return self.simple_dependency_analysis(func_name)
-            
-            # Just return the full report - let the LLM parse it
-            return report
-            
-        finally:
-            if os.path.exists(temp_file):
-                os.unlink(temp_file)
-    
-    def simple_dependency_analysis(self, func_name):
-        """Simple fallback analysis when Clang fails"""
-        return f"Clang analysis failed for {func_name} - unable to determine vectorization status"
     
     def get_system_prompt(self, func_name, loop_description):
         """Generate the system prompt for vectorization"""
         
         return f"""You are an expert in SIMD vectorization using AVX2 intrinsics.
 
-Please eliminate any dependencies and generate optimized vectorized C code that:
-
-Uses AVX2 intrinsics (mm256* functions)
-Targets 8-element vectors for float arrays
-Handles the identified dependencies correctly
-Ensures semantic equivalence with original code
-
 Generate a complete C function named `{func_name}_vectorized` that vectorizes this {loop_description} using AVX2 intrinsics. The function should:
 - Take no parameters (uses global arrays aa, bb, cc for 2D arrays or a, b, c, d, e for 1D arrays)
 - Include any necessary headers like #include <immintrin.h>
-- If it's a nested loop, vectorize the appropriate loop level
-
-Always generate only the vectorized function implementation.
+- Include ALL the iteration logic from the original function (including outer loops like 'for (int nl = 0; nl < 2000*iterations; nl++)')
+- Use AVX2 intrinsics (mm256* functions) for 8-element vectors
+- Ensure semantic equivalence with the original code
+- Call dummy() function where appropriate to match original behavior
 
 When doing vectorization analysis, follow these steps:
 1. Simplify the case by setting the loop iterations to a small number and enumerate the process as the code written.
@@ -658,7 +494,7 @@ When doing vectorization analysis, follow these steps:
 5. Making necessary redundancy removing based on step 2, and necessary unlooping, loop distribution, loop interchanging, statement reordering based on step 3 & 4.
 6. Understand the pattern, then generate the actual vectorized code for the full loop range."""
     
-    def vectorizer_agent(self, source_code, func_name, clang_analysis, feedback=None):
+    def vectorizer_agent(self, source_code, func_name, feedback=None):
         """Generate vectorized code using Anthropic API"""
         
         # Check if this is a nested loop that needs context
@@ -755,7 +591,6 @@ Output only the C function, no explanations."""
     
     def create_modified_tsvc(self, func_name, vectorized_func):
         """Create a minimal test harness that leverages existing TSVC infrastructure"""
-        print(f"DEBUG: Creating elegant test harness for {func_name} using existing TSVC infrastructure")
         
         # Read the original function from tsvc.c to get its signature
         try:
@@ -778,11 +613,6 @@ Output only the C function, no explanations."""
         
         original_func = original_match.group(1)
         
-        # Debug: print the extracted function
-        print(f"DEBUG: Extracted original function for {func_name}:")
-        print("=" * 50)
-        print(original_func[:500] + "..." if len(original_func) > 500 else original_func)
-        print("=" * 50)
         
         # Keep original function as-is, we'll use .format() instead of f-strings to avoid brace conflicts
         
@@ -792,17 +622,10 @@ Output only the C function, no explanations."""
             # Fix function name if needed
             vectorized_func = re.sub(r'void\s+\w+_vectorized\s*\(', f'void {func_name}_vectorized(', vectorized_func)
         
-        # Get the function-specific iteration pattern
-        iteration_pattern = self._get_iteration_pattern(func_name)
-        
         # Create vectorized wrapper that follows the original TSVC pattern
-        # Special handling for functions that need to return specific values
-        if func_name == "s3112":
-            wrapper_return = "return sum;"
-            wrapper_vars = "real_t sum = 0.0;"
-        else:
-            wrapper_return = "return calc_checksum(__func__);"
-            wrapper_vars = ""
+        # All functions follow the same pattern: initialize, time, compute, time, checksum
+        wrapper_return = "return calc_checksum(__func__);"
+        wrapper_vars = ""
         
         vectorized_wrapper = """
 // Vectorized version of {func_name}
@@ -815,18 +638,18 @@ real_t {func_name}_vectorized_wrapper(struct args_t * func_args)
     gettimeofday(&func_args->t1, NULL);
     
     {wrapper_vars}
-    // Run the vectorized function with the same iteration pattern as original
-    {iteration_pattern}
+    // Call the vectorized function directly - it should handle its own iteration
+    {func_name}_vectorized();
     
     gettimeofday(&func_args->t2, NULL);
     {wrapper_return}
 }}
-""".format(func_name=func_name, vectorized_func=vectorized_func, iteration_pattern=iteration_pattern,
+""".format(func_name=func_name, vectorized_func=vectorized_func,
            wrapper_vars=wrapper_vars, wrapper_return=wrapper_return)
         
-        # Get additional functions and variable declarations
+        # Get additional functions needed for this specific function
         additional_functions = self._get_additional_functions(func_name)
-        variable_declarations = self._get_variable_declarations(func_name, original_func)
+        variable_declarations = ""
         
         # Create minimal test harness that leverages existing TSVC infrastructure
         minimal_tsvc = """
@@ -872,8 +695,9 @@ void test_{func_name}_comparison() {{
     struct args_t func_args_orig = {{0}};
     struct args_t func_args_vec = {{0}};
     
-    // Set up function arguments based on the specific function requirements
-    {function_arg_setup}
+    // No special arguments needed - use standard TSVC pattern
+    func_args_orig.arg_info = NULL;
+    func_args_vec.arg_info = NULL;
     
     printf("Testing {func_name}:\\n");
     printf("Function\\tTime(sec)\\tChecksum\\n");
@@ -924,83 +748,11 @@ int main(int argc, char ** argv){{
     func_name=func_name,
     original_func=original_func,
     vectorized_wrapper=vectorized_wrapper,
-    function_arg_setup=self._get_function_arg_setup(func_name),
     additional_functions=additional_functions,
     variable_declarations=variable_declarations
 )
         
         return minimal_tsvc
-    
-    def _get_function_arg_setup(self, func_name):
-        """Generate function-specific argument setup code"""
-        if func_name == "s242":
-            return """// s242 requires struct{real_t a; real_t b;} arguments
-    struct { real_t a; real_t b; } s242_args = {1.0, 1.0};
-    func_args_orig.arg_info = &s242_args;
-    func_args_vec.arg_info = &s242_args;"""
-        elif func_name == "s332":
-            return """// s332 requires int argument
-    int t_val = 0;
-    global_t_value = t_val;  // Set global variable for vectorized function
-    func_args_orig.arg_info = &t_val;
-    func_args_vec.arg_info = &t_val;"""
-        elif func_name in ["s3110", "s3112", "s31111"]:
-            return """// No special arguments needed for this function
-    func_args_orig.arg_info = NULL;
-    func_args_vec.arg_info = NULL;"""
-        elif func_name == "s293":
-            return """// No special arguments needed for s293
-    func_args_orig.arg_info = NULL;
-    func_args_vec.arg_info = NULL;"""
-        else:
-            return """// Default: no special arguments
-    func_args_orig.arg_info = NULL;
-    func_args_vec.arg_info = NULL;"""
-    
-    def _get_iteration_pattern(self, func_name):
-        """Generate function-specific iteration pattern"""
-        if func_name == "s242":
-            return f"""for (int nl = 0; nl < iterations/5; nl++) {{
-        {func_name}_vectorized();
-        dummy(a, b, c, d, e, aa, bb, cc, 0.);
-    }}"""
-        elif func_name == "s293":
-            return f"""for (int nl = 0; nl < 4*iterations; nl++) {{
-        {func_name}_vectorized();
-        dummy(a, b, c, d, e, aa, bb, cc, 0.);
-    }}"""
-        elif func_name in ["s3110"]:
-            return f"""for (int nl = 0; nl < 100*(iterations/(LEN_2D)); nl++) {{
-        {func_name}_vectorized();
-        dummy(a, b, c, d, e, aa, bb, cc, 0.);
-    }}"""
-        elif func_name == "s3112":
-            return f"""for (int nl = 0; nl < iterations; nl++) {{
-        sum = 0.0;  // Reset sum for each iteration
-        {func_name}_vectorized();
-        // Get the final sum from the last element of b array
-        sum = b[LEN_1D-1];
-        dummy(a, b, c, d, e, aa, bb, cc, sum);
-    }}"""
-        elif func_name == "s31111":
-            return f"""for (int nl = 0; nl < 2000*iterations; nl++) {{
-        {func_name}_vectorized();
-        dummy(a, b, c, d, e, aa, bb, cc, 0.);
-    }}"""
-        elif func_name == "s332":
-            return f"""for (int nl = 0; nl < iterations; nl++) {{
-        global_index = -2;  // Reset search result
-        global_value = -1.0;
-        {func_name}_vectorized();
-        // Use the global results found by vectorized function
-        dummy(a, b, c, d, e, aa, bb, cc, global_value);
-    }}"""
-        else:
-            # Default pattern for unknown functions
-            return f"""for (int nl = 0; nl < iterations; nl++) {{
-        {func_name}_vectorized();
-        dummy(a, b, c, d, e, aa, bb, cc, 0.);
-    }}"""
     
     def _get_additional_functions(self, func_name):
         """Get additional functions needed for specific test cases"""
@@ -1017,19 +769,6 @@ real_t test(real_t* A){
         else:
             return ""
     
-    def _get_variable_declarations(self, func_name, original_function):
-        """Get function-specific variable declarations for vectorized function"""
-        if func_name == "s332":
-            # s332 needs the 't' variable and result variables to be accessible to vectorized function
-            return """
-// Global variable for s332 to share 't' value between functions
-int global_t_value = 0;
-// Global variables to store search results
-int global_index = -2;
-real_t global_value = -1.0;
-"""
-        else:
-            return ""
     
     def _detect_modified_arrays(self, func_name):
         """Detect which arrays are modified by analyzing the core loop"""
@@ -1056,7 +795,6 @@ real_t global_value = -1.0;
         if not modified_arrays:
             modified_arrays = ['a']
         
-        print(f"DEBUG: Detected modified arrays for {func_name}: {modified_arrays}")
         return modified_arrays
     
     # Removed old test harness creation methods - now using tsvc.c infrastructure
@@ -1109,11 +847,22 @@ real_t global_value = -1.0;
         
         return vectorized_func
     
-    def compiler_tester_agent(self, func_name, func_data, vectorized_code, iteration=1):
+    def compiler_tester_agent(self, func_name, vectorized_code, iteration=1):
         """Test the vectorized code using the modified tsvc.c framework"""
         
         # Extract and clean the function first
         vectorized_func = self.extract_and_clean_function(vectorized_code)
+        
+        # Save files for debugging - create in workspace root directory
+        # The script is in TSVC_2/src/, so workspace root is two levels up
+        workspace_root = os.path.join(os.path.dirname(__file__), '../..')
+        workspace_root = os.path.abspath(workspace_root)
+        attempts_dir = os.path.join(workspace_root, f"tsvc_vectorized_attempts/{func_name}")
+        os.makedirs(attempts_dir, exist_ok=True)
+        
+        # Save the extracted vectorized function BEFORE checking if it's vectorized
+        with open(os.path.join(attempts_dir, f"extracted_function_{iteration}.c"), 'w') as f:
+            f.write(vectorized_func)
         
         # Then check if the extracted function is actually vectorized
         is_vectorized, vec_message = self.check_if_vectorized(vectorized_func)
@@ -1144,24 +893,11 @@ real_t global_value = -1.0;
                 'performance_data': None
             }
         
-        # Save files for debugging - create in workspace root directory
-        # The script is in TSVC_2/src/, so workspace root is two levels up
-        workspace_root = os.path.join(os.path.dirname(__file__), '../..')
-        workspace_root = os.path.abspath(workspace_root)
-        attempts_dir = os.path.join(workspace_root, f"tsvc_vectorized_attempts/{func_name}")
-        os.makedirs(attempts_dir, exist_ok=True)
-        
         # Save the modified tsvc.c
         modified_tsvc_path = os.path.join(attempts_dir, f"modified_tsvc_{iteration}.c")
         with open(modified_tsvc_path, 'w') as f:
             f.write(modified_tsvc_content)
-        
-        # Save the extracted vectorized function
-        with open(os.path.join(attempts_dir, f"extracted_function_{iteration}.c"), 'w') as f:
-            f.write(vectorized_func)
-        
-        # Don't copy files - use original ones from src directory
-        test_dir = attempts_dir
+
         
         # Compile the modified tsvc.c using original files from src directory
         exe_file = os.path.join(attempts_dir, f"test_executable_{iteration}")
@@ -1318,7 +1054,7 @@ real_t global_value = -1.0;
         
         return performance_data
     
-    def analyze_tsvc_error(self, error_output, func_name):
+    def analyze_tsvc_error(self, error_output):
         """Analyze TSVC-specific test output to provide hints"""
         if "CORRECTNESS: FAIL" in error_output:
             # Extract checksum difference
@@ -1355,7 +1091,7 @@ real_t global_value = -1.0;
         """Legacy method - redirect to analyze_tsvc_error"""
         return self.analyze_tsvc_error(error_output, func_name)
     
-    def save_iteration_data(self, func_name, iteration, vectorized_code, source_code, feedback, clang_report):
+    def save_iteration_data(self, func_name, iteration, vectorized_code, source_code, feedback):
         """Save all data from this iteration for debugging"""
         # Calculate workspace root consistently
         workspace_root = os.path.join(os.path.dirname(__file__), '../..')
@@ -1419,15 +1155,8 @@ Here's what you tried before:
     def run_vectorization_fsm(self, func_name, func_data):
         """Main FSM orchestration for a single function"""
         print(f"\n{'='*60}")
-        print(f"Vectorizing {func_name} ({func_data['category']})")
+        print(f"Vectorizing {func_name}")
         print(f"{'='*60}")
-        
-        # Get Clang analysis
-        print("\nGetting Clang analysis...")
-        clang_report = self.get_clang_vectorization_report(func_name, func_data['code'])
-        
-        # Just use the full report as is
-        print(f"Clang analysis:\n{clang_report}")
         
         # Use core loop for vectorization
         source_to_vectorize = func_data['core_loop']
@@ -1436,27 +1165,22 @@ Here's what you tried before:
         feedback = None
         
         for iteration in range(1, self.max_iterations + 1):
-            print(f"\nIteration {iteration}:")
-            
             # Generate/repair code
-            print("  - Generating vectorized code...")
             vectorized_code = self.vectorizer_agent(
                 source_to_vectorize, 
                 func_name, 
-                clang_report,
                 feedback
             )
             
             if vectorized_code is None:
-                print("  - API error, stopping")
+                print("  API error, stopping")
                 break
             
             # Save iteration data
-            self.save_iteration_data(func_name, iteration, vectorized_code, source_to_vectorize, feedback, clang_report)
+            self.save_iteration_data(func_name, iteration, vectorized_code, source_to_vectorize, feedback)
             
             # Test the code
-            print("  - Testing vectorized code...")
-            test_result = self.compiler_tester_agent(func_name, func_data, vectorized_code, iteration)
+            test_result = self.compiler_tester_agent(func_name, vectorized_code, iteration)
             
             attempts.append({
                 'iteration': iteration,
@@ -1471,69 +1195,21 @@ Here's what you tried before:
             })
             
             if test_result['success']:
-                # Check speedup status for different success messages
-                speedup_status = test_result.get('speedup_status', 'unknown')
-                if speedup_status == 'improved':
-                    print(f"  ✓ SUCCESS! Correct vectorization with performance improvement achieved.")
-                elif speedup_status == 'no_improvement':
-                    print(f"  ✓ SUCCESS! Correct vectorization achieved, but no performance improvement (speedup ≤ 1.0).")
+                perf = test_result.get('performance_data', {})
+                speedup = perf.get('speedup', 0)
+                if speedup > 1.0:
+                    print(f"  ✓ SUCCESS! Speedup: {speedup:.2f}x")
                 else:
-                    print(f"  ✓ SUCCESS! Correct vectorization achieved.")
-                
-                # Print performance data if available
-                if test_result.get('performance_data'):
-                    perf = test_result['performance_data']
-                    print(f"  - Performance Results:")
-                    if perf.get('original_time') and perf.get('vectorized_time'):
-                        print(f"    Original time: {perf['original_time']:.6f}s")
-                        print(f"    Vectorized time: {perf['vectorized_time']:.6f}s")
-                    if perf.get('speedup'):
-                        speedup_val = perf['speedup']
-                        if speedup_val > 1.0:
-                            print(f"    Speedup: {speedup_val:.2f}x (IMPROVED)")
-                        else:
-                            print(f"    Speedup: {speedup_val:.2f}x (NO IMPROVEMENT)")
-                    if perf.get('checksum_diff') is not None:
-                        print(f"    Checksum difference: {perf['checksum_diff']:.2e}")
-                    if perf.get('original_checksum') and perf.get('vectorized_checksum'):
-                        print(f"    Original checksum: {perf['original_checksum']:.1f}")
-                        print(f"    Vectorized checksum: {perf['vectorized_checksum']:.1f}")
+                    print(f"  ✓ SUCCESS! (No speedup: {speedup:.2f}x)")
                 break
             else:
                 print(f"  ✗ FAILED: {test_result['error_type']}")
-                if test_result['error_type'] == 'not_vectorized':
-                    print(f"  - Reason: {test_result['error_message']}")
-                elif test_result['error_message']:
-                    print(f"  - Error: {test_result['error_message']}")
-                if test_result['test_output']:
-                    print(f"  - Test output: {test_result['test_output'][:200]}...")
-                # For correctness errors, test_output and hint are repetitive, so only show test_output
-                if test_result['error_type'] != 'correctness':
-                    print(f"  - Hint: {test_result['hint']}")
-                # Print performance data even for failed tests if available
-                if test_result.get('performance_data'):
-                    perf = test_result['performance_data']
-                    print(f"  - Performance Data:")
-                    if perf.get('original_time') and perf.get('vectorized_time'):
-                        print(f"    Original time: {perf['original_time']:.6f}s")
-                        print(f"    Vectorized time: {perf['vectorized_time']:.6f}s")
-                    if perf.get('speedup'):
-                        print(f"    Speedup: {perf['speedup']:.2f}x")
-                    if perf.get('checksum_diff') is not None:
-                        print(f"    Checksum difference: {perf['checksum_diff']:.2e}")
-                    if perf.get('original_checksum') and perf.get('vectorized_checksum'):
-                        print(f"    Original checksum: {perf['original_checksum']:.1f}")
-                        print(f"    Vectorized checksum: {perf['vectorized_checksum']:.1f}")
-                
                 # Prepare feedback for next iteration
                 feedback = test_result
-                # Add the previous code attempt to feedback
                 feedback['previous_code'] = vectorized_code
         
         return {
             'function': func_name,
-            'category': func_data['category'],
-            'clang_analysis': clang_report,
             'total_iterations': len(attempts),
             'success': attempts[-1]['success'] if attempts else False,
             'speedup_status': attempts[-1].get('speedup_status') if attempts else None,
@@ -1555,24 +1231,14 @@ Here's what you tried before:
         self.test_functions = self.extract_tsvc_functions(functions_to_test)
         
         results = []
-        category_stats = {}
         
         for func_name in functions_to_test:
             if func_name not in self.test_functions:
-                print(f"Function {func_name} not found in TSVC")
                 continue
                 
             func_data = self.test_functions[func_name]
             result = self.run_vectorization_fsm(func_name, func_data)
             results.append(result)
-            
-            # Update category statistics
-            category = func_data['category']
-            if category not in category_stats:
-                category_stats[category] = {'success': 0, 'total': 0}
-            category_stats[category]['total'] += 1
-            if result['success']:
-                category_stats[category]['success'] += 1
             
             # Save results in workspace root
             results_dir = os.path.join(workspace_root, 'tsvc_results')
@@ -1583,7 +1249,7 @@ Here's what you tried before:
             time.sleep(1)  # Rate limiting
         
         # Print summary
-        self.print_summary(results, category_stats)
+        self.print_summary(results)
         
         # Save all results in workspace root
         results_file = os.path.join(workspace_root, 'tsvc_vectorization_results.json')
@@ -1593,13 +1259,12 @@ Here's what you tried before:
                 'model': self.model,
                 'temperature': self.temperature,
                 'max_iterations': self.max_iterations,
-                'results': results,
-                'category_stats': category_stats
+                'results': results
             }, f, indent=2)
         
         return results
     
-    def print_summary(self, results, category_stats):
+    def print_summary(self, results):
         """Print experiment summary"""
         print(f"\n{'='*60}")
         print("TSVC VECTORIZATION SUMMARY")
@@ -1635,13 +1300,7 @@ Here's what you tried before:
                         perf_info = f" (Speedup: {speedup_val:.2f}x)"
                     else:
                         perf_info = f" (Speedup: {speedup_val:.2f}x - NO IMPROVEMENT)"
-            print(f"  {result['function']:6s} ({result['category']}): {status} after {result['total_iterations']} iterations{perf_info}")
-        
-        # By category
-        print("\nBy Category:")
-        for category, stats in category_stats.items():
-            success_rate = stats['success'] / stats['total'] * 100 if stats['total'] > 0 else 0
-            print(f"  {category:20s}: {stats['success']}/{stats['total']} ({success_rate:.1f}%)")
+            print(f"  {result['function']:6s}: {status}{perf_info}")
 
 
 def main():
