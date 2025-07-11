@@ -477,18 +477,30 @@ class TSVCVectorizerExperiment:
         return f"""You are an expert in SIMD vectorization using AVX2 intrinsics.
 
 Generate a complete C function named `{func_name}_vectorized` that vectorizes this {loop_description} using AVX2 intrinsics. The function should:
-- Take no parameters (uses global arrays aa, bb, cc for 2D arrays or a, b, c, d, e for 1D arrays)
+- Take no parameters and use the existing global arrays (a, b, c, d, e for 1D arrays and aa, bb, cc for 2D arrays) - DO NOT declare new arrays
 - Include any necessary headers like #include <immintrin.h>
 - Include ALL the iteration logic from the original function (including outer loops like 'for (int nl = 0; nl < 2000*iterations; nl++)')
-- Use AVX2 intrinsics (mm256* functions) for 8-element vectors
+- Use AVX2 intrinsics (_mm256_ps functions) for 8-element float vectors (NOT _mm256_pd which is for double)
 - Ensure semantic equivalence with the original code
 - Call dummy() function where appropriate to match original behavior
+
+IMPORTANT TYPE AND DECLARATION CONSTRAINTS:
+- Arrays are declared as 'real_t' type (NOT double), where real_t is typedef'd as float
+- DO NOT declare extern variables for: LEN_1D, LEN_2D, iterations (these are macros)
+- 1D arrays: a, b, c, d, e are declared as 'real_t a[LEN_1D]' etc.
+- 2D arrays: aa, bb, cc are declared as 'real_t aa[LEN_2D][LEN_2D]' etc.
+- dummy() function signature: int dummy(real_t*, real_t*, real_t*, real_t*, real_t*, real_t(*)[LEN_2D], real_t(*)[LEN_2D], real_t(*)[LEN_2D], real_t)
+- If you need to reference these arrays, do NOT use extern declarations - they are already global
+- For functions like s242 that use s1, s2 values: these should be declared as local variables (real_t s1 = 1.0; real_t s2 = 1.0;) since the vectorized function doesn't receive arguments
 
 When doing vectorization analysis, follow these steps:
 1. Simplify the case by setting the loop iterations to a small number and enumerate the process as the code written.
 2. When enumerating, recognize overwrittened assignments and calculations that cancled each other out, remove all these redundant operations,
    aware the edge cases at the beginning and the end.
 3. For the rest of operations, identify which element is refered as its original value and which one is refered as its updated value.
+   CRITICAL: If a[i] depends on a[j] and j might be overwritten during the loop, you must split the vectorization into phases:
+   - Phase 1: Process elements that use original values
+   - Phase 2: Process elements that use updated values
 4. Load original values(not updated if executing sequentially like a[i+1]) directly from memory first, then compute elements that use original values, then store these elements.
    After that, load the updated values from memory, then compute elements that use updated values, finally store these elements.
 5. Making necessary redundancy removing based on step 2, and necessary unlooping, loop distribution, loop interchanging, statement reordering based on step 3 & 4.
@@ -634,7 +646,7 @@ Output only the C function, no explanations."""
 real_t {func_name}_vectorized_wrapper(struct args_t * func_args)
 {{
     // Use the same initialization and timing pattern as original TSVC
-    initialise_arrays(__func__);
+    initialise_arrays("{func_name}");
     gettimeofday(&func_args->t1, NULL);
     
     {wrapper_vars}
@@ -642,10 +654,10 @@ real_t {func_name}_vectorized_wrapper(struct args_t * func_args)
     {func_name}_vectorized();
     
     gettimeofday(&func_args->t2, NULL);
-    {wrapper_return}
+    return calc_checksum("{func_name}");
 }}
 """.format(func_name=func_name, vectorized_func=vectorized_func,
-           wrapper_vars=wrapper_vars, wrapper_return=wrapper_return)
+           wrapper_vars=wrapper_vars)
         
         # Get additional functions needed for this specific function
         additional_functions = self._get_additional_functions(func_name)
@@ -695,9 +707,7 @@ void test_{func_name}_comparison() {{
     struct args_t func_args_orig = {{0}};
     struct args_t func_args_vec = {{0}};
     
-    // No special arguments needed - use standard TSVC pattern
-    func_args_orig.arg_info = NULL;
-    func_args_vec.arg_info = NULL;
+    {argument_setup}
     
     printf("Testing {func_name}:\\n");
     printf("Function\\tTime(sec)\\tChecksum\\n");
@@ -749,7 +759,8 @@ int main(int argc, char ** argv){{
     original_func=original_func,
     vectorized_wrapper=vectorized_wrapper,
     additional_functions=additional_functions,
-    variable_declarations=variable_declarations
+    variable_declarations=variable_declarations,
+    argument_setup=self._generate_argument_setup(func_name)
 )
         
         return minimal_tsvc
@@ -968,14 +979,14 @@ real_t test(real_t* A){
                     'error_type': 'correctness',
                     'error_message': 'Checksum mismatch between original and vectorized versions',
                     'test_output': run_result.stdout,
-                    'hint': self.analyze_tsvc_error(run_result.stdout, func_name),
+                    'hint': self.analyze_tsvc_error(run_result.stdout),
                     'performance_data': performance_data
                 }
             else:
                 # Execution completed but no clear pass/fail indication
                 return {
                     'success': False,
-                    'error_type': 'execution',
+                    'error_type': 'execution_incomplete',
                     'error_message': 'Test execution completed but results unclear',
                     'test_output': run_result.stdout,
                     'hint': 'Check the test output for runtime errors',
@@ -994,7 +1005,7 @@ real_t test(real_t* A){
         except Exception as e:
             return {
                 'success': False,
-                'error_type': 'execution',
+                'error_type': 'execution_error',
                 'error_message': f'Execution failed: {str(e)}',
                 'test_output': None,
                 'hint': 'Check for runtime errors or missing dependencies',
@@ -1054,6 +1065,68 @@ real_t test(real_t* A){
         
         return performance_data
     
+    def _get_function_arguments(self, func_name):
+        """Get special arguments required for specific TSVC functions"""
+        
+        # Functions that require struct{real_t a; real_t b;} * arg_info
+        real_t_struct_functions = {
+            's242': {'a': 1.0, 'b': 1.0},  # s1 = 1, s2 = 1
+        }
+        
+        # Functions that require int * arg_info  
+        int_functions = {
+            's162': 1,      # k = 1
+            's171': 1,      # inc = 1  
+            's174': 10,     # M = 10
+            's175': 1,      # inc = 1
+        }
+        
+        # Functions that require struct{int a; int b;} * arg_info
+        int_struct_functions = {
+            's122': {'a': 1, 'b': 2},    # n1 = 1, n3 = 2
+            's172': {'a': 1, 'b': 1},    # n1 = 1, n3 = 1  
+        }
+        
+        if func_name in real_t_struct_functions:
+            return real_t_struct_functions[func_name]
+        elif func_name in int_functions:
+            return int_functions[func_name]
+        elif func_name in int_struct_functions:
+            return int_struct_functions[func_name]
+        else:
+            return None
+
+    def _generate_argument_setup(self, func_name):
+        """Generate C code to set up arguments for a specific function"""
+        args = self._get_function_arguments(func_name)
+        
+        if args is None:
+            return "// No special arguments needed - use standard TSVC pattern\n    func_args_orig.arg_info = NULL;\n    func_args_vec.arg_info = NULL;"
+        
+        if func_name == 's242':
+            # struct{real_t a; real_t b;} * arg_info
+            return f"""// Set up arguments for s242: struct{{real_t a; real_t b;}}
+    static struct{{real_t a; real_t b;}} s242_args = {{{args['a']}, {args['b']}}};
+    func_args_orig.arg_info = &s242_args;
+    func_args_vec.arg_info = &s242_args;"""
+        
+        elif func_name in ['s162', 's171', 's174', 's175']:
+            # int * arg_info
+            return f"""// Set up arguments for {func_name}: int
+    static int {func_name}_arg = {args};
+    func_args_orig.arg_info = &{func_name}_arg;
+    func_args_vec.arg_info = &{func_name}_arg;"""
+        
+        elif func_name in ['s122', 's172']:
+            # struct{int a; int b;} * arg_info  
+            return f"""// Set up arguments for {func_name}: struct{{int a; int b;}}
+    static struct{{int a; int b;}} {func_name}_args = {{{args['a']}, {args['b']}}};
+    func_args_orig.arg_info = &{func_name}_args;
+    func_args_vec.arg_info = &{func_name}_args;"""
+        
+        else:
+            return "// No special arguments needed - use standard TSVC pattern\n    func_args_orig.arg_info = NULL;\n    func_args_vec.arg_info = NULL;"
+
     def analyze_tsvc_error(self, error_output):
         """Analyze TSVC-specific test output to provide hints"""
         if "CORRECTNESS: FAIL" in error_output:
@@ -1204,6 +1277,9 @@ Here's what you tried before:
                 break
             else:
                 print(f"  ✗ FAILED: {test_result['error_type']}")
+                
+                # Continue with the next iteration regardless of error type
+                
                 # Prepare feedback for next iteration
                 feedback = test_result
                 feedback['previous_code'] = vectorized_code
@@ -1245,6 +1321,8 @@ Here's what you tried before:
             os.makedirs(results_dir, exist_ok=True)
             with open(os.path.join(results_dir, f'{func_name}.json'), 'w') as f:
                 json.dump(result, f, indent=2)
+            
+            # Continue with the next function regardless of errors
             
             time.sleep(1)  # Rate limiting
         
@@ -1303,6 +1381,33 @@ Here's what you tried before:
             print(f"  {result['function']:6s}: {status}{perf_info}")
 
 
+def get_all_tsvc_functions():
+    """Extract all function names from tsvc.c"""
+    import re
+    
+    # Read tsvc.c file
+    tsvc_content = None
+    try:
+        with open('TSVC_2/src/tsvc.c', 'r') as f:
+            tsvc_content = f.read()
+    except FileNotFoundError:
+        try:
+            with open('tsvc.c', 'r') as f:
+                tsvc_content = f.read()
+        except FileNotFoundError:
+            print("Error: tsvc.c not found")
+            return []
+    
+    # Find all function definitions matching the pattern
+    func_pattern = r'real_t (s\d+[a-z]*?)\(struct args_t \* func_args\)'
+    matches = re.findall(func_pattern, tsvc_content)
+    
+    # Filter out any duplicates and sort
+    functions = sorted(list(set(matches)))
+    
+    print(f"Found {len(functions)} functions in tsvc.c")
+    return functions
+
 def main():
     # Clean up workspace before running
     cleanup_workspace()
@@ -1310,10 +1415,13 @@ def main():
     # Use your Anthropic API key
     api_key = "key"
     
+    # Get all functions from tsvc.c
+    all_functions = get_all_tsvc_functions()
+    
     experiment = TSVCVectorizerExperiment(api_key)
     
-    # Test all problematic functions that were experiencing compilation and execution errors
-    experiment.run_experiment(functions_to_test=['s31111'])
+    # Test all functions from tsvc.c
+    experiment.run_experiment(functions_to_test=all_functions)
 
 if __name__ == "__main__":
     main()
