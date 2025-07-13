@@ -53,7 +53,7 @@ class TSVCVectorizerExperiment:
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model = "claude-sonnet-4-20250514"
         self.max_iterations = 1
-        self.temperature = 0.2  # Lower temperature for more consistent code generation
+        self.temperature = 0.7  # Balanced temperature for creative but consistent solutions
         self.results = {}
         
         # Extract test functions - will be populated by run_experiment
@@ -215,11 +215,10 @@ class TSVCVectorizerExperiment:
                 if not core_loop:
                     core_loop = "// No computational loop found"
                 
-                # Add missing variable declarations to the core loop
-                if core_loop and core_loop != "// No computational loop found":
-                    core_loop = self.add_missing_declarations(core_loop, func_body)
+                # Store the original core loop BEFORE adding declarations
+                original_core_loop = core_loop
                 
-                # Clean up the loop
+                # Clean up the loop formatting first
                 if core_loop and core_loop != "// No computational loop found":
                     # Normalize whitespace
                     lines = core_loop.split('\n')
@@ -246,11 +245,22 @@ class TSVCVectorizerExperiment:
                                 # Regular line
                                 cleaned_lines.append('    ' * indent_level + stripped)
                     
-                    core_loop = '\n'.join(cleaned_lines)
+                    original_core_loop = '\n'.join(cleaned_lines)
+                
+                # Add missing variable declarations to create a version with declarations
+                core_loop_with_decls = original_core_loop
+                if original_core_loop and original_core_loop != "// No computational loop found":
+                    core_loop_with_decls = self.add_missing_declarations(original_core_loop, func_body)
+                
+                # Extract the return statement from the original function
+                return_match = re.search(r'return\s+([^;]+);', func_body)
+                return_expression = return_match.group(1) if return_match else None
                 
                 functions[func_name] = {
                     'code': full_function,
-                    'core_loop': core_loop
+                    'core_loop': original_core_loop,  # Store the clean original without declarations
+                    'core_loop_with_decls': core_loop_with_decls,  # Store version with declarations if needed
+                    'return_expression': return_expression
                 }
                 
                 
@@ -300,7 +310,7 @@ class TSVCVectorizerExperiment:
                 elif match in ['a', 'b', 'c', 'd', 'e', 'aa', 'bb', 'cc', 'nl']:
                     continue
                 # Skip function names and macro names
-                elif match in ['test', 'dummy', 'gettimeofday', 'printf', 'initialise_arrays', 'calc_checksum', 'iterations']:
+                elif match in ['test', 'dummy', 'gettimeofday', 'printf', 'initialise_arrays', 'calc_checksum', 'iterations', 'LEN_1D', 'LEN_2D', 'ARRAY_ALIGNMENT']:
                     continue
                 elif match in ['i', 'j']:
                     # Check if this variable is declared in a for loop in the core loop
@@ -361,7 +371,7 @@ class TSVCVectorizerExperiment:
                     if (ref_var.isdigit() or
                         ref_var in ['real_t', 'int', 'float', 'double', 'char', 'void'] or
                         ref_var in ['a', 'b', 'c', 'd', 'e', 'aa', 'bb', 'cc', 'nl'] or
-                        ref_var in ['test', 'dummy', 'gettimeofday', 'printf', 'initialise_arrays', 'calc_checksum', 'iterations'] or
+                        ref_var in ['test', 'dummy', 'gettimeofday', 'printf', 'initialise_arrays', 'calc_checksum', 'iterations', 'LEN_1D', 'LEN_2D', 'ARRAY_ALIGNMENT'] or
                         ref_var in processed):
                         continue
                     
@@ -413,7 +423,7 @@ class TSVCVectorizerExperiment:
                     if (not ref_var.isdigit() and
                         ref_var not in ['real_t', 'int', 'float', 'double', 'char', 'void'] and
                         ref_var not in ['a', 'b', 'c', 'd', 'e', 'aa', 'bb', 'cc', 'nl'] and
-                        ref_var not in ['test', 'dummy', 'gettimeofday', 'printf', 'initialise_arrays', 'calc_checksum', 'iterations'] and
+                        ref_var not in ['test', 'dummy', 'gettimeofday', 'printf', 'initialise_arrays', 'calc_checksum', 'iterations', 'LEN_1D', 'LEN_2D', 'ARRAY_ALIGNMENT'] and
                         ref_var in all_vars and ref_var != var):
                         dependencies.add(ref_var)
                 break  # Use first valid initialization
@@ -471,18 +481,43 @@ class TSVCVectorizerExperiment:
         return result
     
     
-    def get_system_prompt(self, func_name, loop_description):
+    def get_system_prompt(self, func_name, loop_description, return_expression):
         """Generate the system prompt for vectorization"""
+        
+        # Determine if function needs specific return value
+        needs_return = return_expression is not None and return_expression != "calc_checksum(__func__)"
+        
+        if needs_return:
+            return_info = f"""
+IMPORTANT: The original function returns: {return_expression}
+Your vectorized function MUST:
+- Be named `real_t {func_name}_vectorized(struct args_t * func_args)`
+- Include initialise_arrays and gettimeofday calls like the original
+- Compute and return the exact same value: {return_expression}
+- Ensure all variables used in the return expression are properly computed"""
+        else:
+            return_info = f"""
+The vectorized function should:
+- Be named `real_t {func_name}_vectorized(struct args_t * func_args)`
+- Include initialise_arrays and gettimeofday calls like the original
+- Return calc_checksum(__func__)"""
         
         return f"""You are an expert in SIMD vectorization using AVX2 intrinsics.
 
 Generate a complete C function named `{func_name}_vectorized` that vectorizes this {loop_description} using AVX2 intrinsics. The function should:
-- Take no parameters and use the existing global arrays (a, b, c, d, e for 1D arrays and aa, bb, cc for 2D arrays) - DO NOT declare new arrays
+- Have the exact same signature as the original: real_t {func_name}_vectorized(struct args_t * func_args)
+- Include the same initialization pattern: initialise_arrays(__func__) at the beginning
+- Use gettimeofday(&func_args->t1, NULL) BEFORE the computation loops (NOT local struct timeval variables)
+- Use gettimeofday(&func_args->t2, NULL) AFTER the computation loops (NOT local struct timeval variables)
+- DO NOT declare struct timeval variables - use func_args->t1 and func_args->t2 directly
+- Use the existing global arrays (a, b, c, d, e for 1D arrays and aa, bb, cc for 2D arrays) - DO NOT declare new arrays
 - Include any necessary headers like #include <immintrin.h>
 - Include ALL the iteration logic from the original function (including outer loops like 'for (int nl = 0; nl < 2000*iterations; nl++)')
 - Use AVX2 intrinsics (_mm256_ps functions) for 8-element float vectors (NOT _mm256_pd which is for double)
 - Ensure semantic equivalence with the original code
 - Call dummy() function where appropriate to match original behavior
+
+{return_info}
 
 IMPORTANT TYPE AND DECLARATION CONSTRAINTS:
 - Arrays are declared as 'real_t' type (NOT double), where real_t is typedef'd as float
@@ -491,7 +526,6 @@ IMPORTANT TYPE AND DECLARATION CONSTRAINTS:
 - 2D arrays: aa, bb, cc are declared as 'real_t aa[LEN_2D][LEN_2D]' etc.
 - dummy() function signature: int dummy(real_t*, real_t*, real_t*, real_t*, real_t*, real_t(*)[LEN_2D], real_t(*)[LEN_2D], real_t(*)[LEN_2D], real_t)
 - If you need to reference these arrays, do NOT use extern declarations - they are already global
-- For functions like s242 that use s1, s2 values: these should be declared as local variables (real_t s1 = 1.0; real_t s2 = 1.0;) since the vectorized function doesn't receive arguments
 
 When doing vectorization analysis, follow these steps:
 1. Simplify the case by setting the loop iterations to a small number and enumerate the process as the code written.
@@ -508,6 +542,9 @@ When doing vectorization analysis, follow these steps:
     
     def vectorizer_agent(self, source_code, func_name, feedback=None):
         """Generate vectorized code using Anthropic API"""
+        
+        # Get return expression for this function
+        return_expression = self.test_functions[func_name].get('return_expression', None)
         
         # Check if this is a nested loop that needs context
         needs_outer_context = 'j < i' in source_code or ('i' in source_code and 'for' in source_code and 'int i' not in source_code)
@@ -555,12 +592,12 @@ Here's what you tried before:
 
 Generate a corrected `{func_name}_vectorized` function that:
 - Fixes the error
-- Takes no parameters (uses global arrays)  
+- Has the correct signature: real_t {func_name}_vectorized(struct args_t * func_args)
 - Correctly vectorizes the {loop_description}
 
 Output only the C function, no explanations."""
         
-        system_prompt = self.get_system_prompt(func_name, loop_description)
+        system_prompt = self.get_system_prompt(func_name, loop_description, return_expression)
         
         try:
             message = self.client.messages.create(
@@ -598,8 +635,13 @@ Output only the C function, no explanations."""
             if indicator in code:
                 return True, "Found vector intrinsics"
         
+        # Check if the LLM just copied the original code
+        if 'vectorized' in code and not any(ind in code for ind in vectorization_indicators):
+            # It has the vectorized function name but no actual vectorization
+            return False, "Function appears to be a copy of the original without actual vectorization. The LLM may have misunderstood the task."
+        
         # Only if no intrinsics found, then it's not vectorized
-        return False, "No vector intrinsics found"
+        return False, "No vector intrinsics found. The code needs to use AVX2 intrinsics like _mm256_load_ps, _mm256_add_ps, etc."
     
     def create_modified_tsvc(self, func_name, vectorized_func):
         """Create a minimal test harness that leverages existing TSVC infrastructure"""
@@ -624,40 +666,6 @@ Output only the C function, no explanations."""
             raise ValueError(f"Original function {func_name} not found in tsvc.c")
         
         original_func = original_match.group(1)
-        
-        
-        # Keep original function as-is, we'll use .format() instead of f-strings to avoid brace conflicts
-        
-        # Clean up the vectorized function to ensure it has the right signature
-        # Most vectorized functions should take no parameters and use global arrays
-        if f'void {func_name}_vectorized(' not in vectorized_func:
-            # Fix function name if needed
-            vectorized_func = re.sub(r'void\s+\w+_vectorized\s*\(', f'void {func_name}_vectorized(', vectorized_func)
-        
-        # Create vectorized wrapper that follows the original TSVC pattern
-        # All functions follow the same pattern: initialize, time, compute, time, checksum
-        wrapper_return = "return calc_checksum(__func__);"
-        wrapper_vars = ""
-        
-        vectorized_wrapper = """
-// Vectorized version of {func_name}
-{vectorized_func}
-
-real_t {func_name}_vectorized_wrapper(struct args_t * func_args)
-{{
-    // Use the same initialization and timing pattern as original TSVC
-    initialise_arrays("{func_name}");
-    gettimeofday(&func_args->t1, NULL);
-    
-    {wrapper_vars}
-    // Call the vectorized function directly - it should handle its own iteration
-    {func_name}_vectorized();
-    
-    gettimeofday(&func_args->t2, NULL);
-    return calc_checksum("{func_name}");
-}}
-""".format(func_name=func_name, vectorized_func=vectorized_func,
-           wrapper_vars=wrapper_vars)
         
         # Get additional functions needed for this specific function
         additional_functions = self._get_additional_functions(func_name)
@@ -700,7 +708,8 @@ int dummy(real_t a[LEN_1D], real_t b[LEN_1D], real_t c[LEN_1D], real_t d[LEN_1D]
 // Original function from tsvc.c
 {original_func}
 
-{vectorized_wrapper}
+// Vectorized version
+{vectorized_func}
 
 // Test function using the clean TSVC pattern
 void test_{func_name}_comparison() {{
@@ -719,7 +728,7 @@ void test_{func_name}_comparison() {{
     printf("{func_name}_orig\\t%10.6f\\t%f\\n", time_orig, checksum_orig);
     
     // Test vectorized version
-    real_t checksum_vec = {func_name}_vectorized_wrapper(&func_args_vec);
+    real_t checksum_vec = {func_name}_vectorized(&func_args_vec);
     double time_vec = (func_args_vec.t2.tv_sec - func_args_vec.t1.tv_sec) +
                      (func_args_vec.t2.tv_usec - func_args_vec.t1.tv_usec) / 1000000.0;
     printf("{func_name}_vec\\t%10.6f\\t%f\\n", time_vec, checksum_vec);
@@ -757,7 +766,7 @@ int main(int argc, char ** argv){{
 """.format(
     func_name=func_name,
     original_func=original_func,
-    vectorized_wrapper=vectorized_wrapper,
+    vectorized_func=vectorized_func,
     additional_functions=additional_functions,
     variable_declarations=variable_declarations,
     argument_setup=self._generate_argument_setup(func_name)
@@ -856,6 +865,25 @@ real_t test(real_t* A){
         # Fix asterisk issues with intrinsics (LLM sometimes uses *mm256* instead of _mm256_)
         vectorized_func = re.sub(r'\*mm256\*', '_mm256_', vectorized_func)
         
+        # Fix gettimeofday issues - replace local struct timeval with func_args
+        vectorized_func = re.sub(r'struct\s+timeval\s+\w+\s*,\s*\w+\s*;', '', vectorized_func)
+        vectorized_func = re.sub(r'gettimeofday\s*\(\s*&\s*(\w+)\s*,\s*NULL\s*\)', 
+                                lambda m: 'gettimeofday(&func_args->t1, NULL)' if m.group(1) in ['start', 't1'] 
+                                         else 'gettimeofday(&func_args->t2, NULL)', 
+                                vectorized_func)
+        
+        # Fix calc_checksum issues - replace __func__ with the original function name
+        func_name_match = re.search(r'(\w+)_vectorized', vectorized_func)
+        if func_name_match:
+            orig_func_name = func_name_match.group(1)
+            vectorized_func = re.sub(r'calc_checksum\s*\(\s*__func__\s*\)', 
+                                    f'calc_checksum("{orig_func_name}")', 
+                                    vectorized_func)
+            # Also fix initialise_arrays
+            vectorized_func = re.sub(r'initialise_arrays\s*\(\s*__func__\s*\)', 
+                                    f'initialise_arrays("{orig_func_name}")', 
+                                    vectorized_func)
+        
         return vectorized_func
     
     def compiler_tester_agent(self, func_name, vectorized_code, iteration=1):
@@ -883,13 +911,9 @@ real_t test(real_t* A){
                 'error_type': 'not_vectorized',
                 'error_message': vec_message,
                 'test_output': None,
-                'hint': 'The code does not contain vector intrinsics. Try to actually vectorize the loop.',
+                'hint': 'The code must use AVX2 intrinsics (_mm256_* functions) to vectorize the loop. Review the vectorization steps in the system prompt.',
                 'performance_data': None
             }
-        
-        # Ensure correct function name
-        if f'{func_name}_vectorized' not in vectorized_func:
-            vectorized_func = re.sub(r'void\s+\w+\s*\(', f'void {func_name}_vectorized(', vectorized_func)
         
         # Create modified tsvc.c with both original and vectorized versions
         try:
@@ -949,6 +973,13 @@ real_t test(real_t* A){
                 cwd=src_dir
             )
             
+            # Save the full output for debugging
+            with open(os.path.join(attempts_dir, f"test_output_{iteration}.txt"), 'w') as f:
+                f.write(run_result.stdout)
+                if run_result.stderr:
+                    f.write("\n\nSTDERR:\n")
+                    f.write(run_result.stderr)
+            
             # Parse the output to extract performance data
             performance_data = self.parse_performance_output(run_result.stdout)
             
@@ -984,12 +1015,23 @@ real_t test(real_t* A){
                 }
             else:
                 # Execution completed but no clear pass/fail indication
+                # This is where the original bug was - we need better error diagnostics
+                error_msg = "Test execution completed but results unclear"
+                if run_result.stderr:
+                    error_msg += f"\nSTDERR: {run_result.stderr}"
+                
+                # Check for common issues in stdout
+                if "Unknown function name" in run_result.stdout:
+                    error_msg = "calc_checksum failed: function name not recognized"
+                elif "_vec" not in run_result.stdout:
+                    error_msg = "Vectorized function did not execute properly"
+                
                 return {
                     'success': False,
                     'error_type': 'execution_incomplete',
-                    'error_message': 'Test execution completed but results unclear',
+                    'error_message': error_msg,
                     'test_output': run_result.stdout,
-                    'hint': 'Check the test output for runtime errors',
+                    'hint': 'Check if the vectorized function has the correct signature and return statement',
                     'performance_data': performance_data
                 }
                 
@@ -1029,25 +1071,23 @@ real_t test(real_t* A){
         lines = output.split('\n')
         for line in lines:
             if '_orig' in line and '\t' in line:
-                # Parse original function results: s1244	s1244_orig	  4.158379	159997.000000
+                # Parse original function results
                 parts = line.split('\t')
-                if len(parts) >= 4:
+                if len(parts) >= 3:
                     try:
-                        # The format is: function_name	function_name_orig	time	checksum
-                        time_str = parts[2].strip()
-                        checksum_str = parts[3].strip()
+                        time_str = parts[1].strip()
+                        checksum_str = parts[2].strip()
                         performance_data['original_time'] = float(time_str)
                         performance_data['original_checksum'] = float(checksum_str)
                     except (ValueError, IndexError):
                         pass
             elif '_vec' in line and '\t' in line:
-                # Parse vectorized function results: s1244_vectorized_wrapper	s1244_vec	  0.616577	160000.000000
+                # Parse vectorized function results
                 parts = line.split('\t')
-                if len(parts) >= 4:
+                if len(parts) >= 3:
                     try:
-                        # The format is: function_name_wrapper	function_name_vec	time	checksum
-                        time_str = parts[2].strip()
-                        checksum_str = parts[3].strip()
+                        time_str = parts[1].strip()
+                        checksum_str = parts[2].strip()
                         performance_data['vectorized_time'] = float(time_str)
                         performance_data['vectorized_checksum'] = float(checksum_str)
                     except (ValueError, IndexError):
@@ -1185,7 +1225,8 @@ real_t test(real_t* A){
             # This is a simplified version since we don't have all the context here
             loop_description = "loop"
         
-        system_prompt = self.get_system_prompt(func_name, loop_description)
+        return_expression = self.test_functions[func_name].get('return_expression', None)
+        system_prompt = self.get_system_prompt(func_name, loop_description, return_expression)
         
         if feedback is None:
             user_prompt = f"""
@@ -1269,11 +1310,11 @@ Here's what you tried before:
             
             if test_result['success']:
                 perf = test_result.get('performance_data', {})
-                speedup = perf.get('speedup', 0)
-                if speedup > 1.0:
+                speedup = perf.get('speedup', 0) if perf else 0
+                if speedup and speedup > 1.0:
                     print(f"  ✓ SUCCESS! Speedup: {speedup:.2f}x")
                 else:
-                    print(f"  ✓ SUCCESS! (No speedup: {speedup:.2f}x)")
+                    print(f"  ✓ SUCCESS! (No speedup: {speedup:.2f}x)" if speedup else "  ✓ SUCCESS! (No speedup data)")
                 break
             else:
                 print(f"  ✗ FAILED: {test_result['error_type']}")
@@ -1420,8 +1461,10 @@ def main():
     
     experiment = TSVCVectorizerExperiment(api_key)
     
-    # Test all functions from tsvc.c
-    experiment.run_experiment(functions_to_test=['s3110'])
+    # Test a few functions first to verify the fix
+    test_functions = ['s112', 's114', 's115', 's116', 's1161']
+    print(f"Testing {len(test_functions)} functions to verify the fix...")
+    experiment.run_experiment(functions_to_test=all_functions)
 
 if __name__ == "__main__":
     main()
