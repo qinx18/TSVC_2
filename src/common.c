@@ -218,6 +218,9 @@ int initialise_arrays(const char* name)
     } else if (!strcmp(name, "s113")) {
         set_1d_array(a, LEN_1D, one,unit);
         set_1d_array(b, LEN_1D, any,frac2);
+    } else if (!strcmp(name, "s1113")) {
+        set_1d_array(a, LEN_1D, one,unit);
+        set_1d_array(b, LEN_1D, any,frac2);
     } else if (!strcmp(name, "s114")) {
         set_2d_array(aa, any,frac);
         set_2d_array(bb, any,frac2);
@@ -298,6 +301,13 @@ int initialise_arrays(const char* name)
         set_1d_array(c, LEN_1D, one,unit);
         set_1d_array(d, LEN_1D, any,frac);
         set_1d_array(e, LEN_1D, any,frac);
+    } else if (!strcmp(name, "s1161")) {
+        set_1d_array(a, LEN_1D, one,unit);
+        set_1d_array( &b[0], LEN_1D/2, one,2);
+        set_1d_array( &b[1], LEN_1D/2,-one,2);
+        set_1d_array(c, LEN_1D, one,unit);
+        set_1d_array(d, LEN_1D, any,frac);
+        set_1d_array(e, LEN_1D, any,frac);
     } else if (!strcmp(name, "s162")) {
         set_1d_array(a, LEN_1D, one,unit);
         set_1d_array(b, LEN_1D, any,frac);
@@ -332,6 +342,11 @@ int initialise_arrays(const char* name)
         set_1d_array(b, LEN_1D, one,unit);
         set_1d_array(c, LEN_1D, one,unit);
         set_1d_array(d, LEN_1D, any,frac);
+    } else if (!strcmp(name, "s1213")) {
+        set_1d_array(a, LEN_1D, any,frac);
+        set_1d_array(b, LEN_1D, one,unit);
+        set_1d_array(c, LEN_1D, one,unit);
+        set_1d_array(d, LEN_1D, any,frac);
     } else if (!strcmp(name, "s221")) {
         set_1d_array(a, LEN_1D, one,unit);
         set_1d_array(b, LEN_1D, any,frac);
@@ -348,6 +363,10 @@ int initialise_arrays(const char* name)
         set_2d_array(aa, one,unit);
         set_2d_array(bb,zero,unit);
     } else if (!strcmp(name, "s233")) {
+        set_2d_array(aa, any,frac);
+        set_2d_array(bb, any,frac);
+        set_2d_array(cc, any,frac);
+    } else if (!strcmp(name, "s2233")) {
         set_2d_array(aa, any,frac);
         set_2d_array(bb, any,frac);
         set_2d_array(cc, any,frac);
@@ -382,7 +401,18 @@ int initialise_arrays(const char* name)
         set_1d_array(b, LEN_1D, one,unit);
         set_1d_array(c, LEN_1D,small,unit);
         set_1d_array(d, LEN_1D,small,unit);
+    } else if (!strcmp(name, "s1244")) {
+        set_1d_array(a, LEN_1D,zero,unit);
+        set_1d_array(b, LEN_1D, one,unit);
+        set_1d_array(c, LEN_1D,small,unit);
+        set_1d_array(d, LEN_1D,small,unit);
     } else if (!strcmp(name, "s251")) {
+        set_1d_array(a, LEN_1D,zero,unit);
+        set_1d_array(b, LEN_1D, one,unit);
+        set_1d_array(c, LEN_1D, any,frac);
+        set_1d_array(d, LEN_1D, any,frac);
+        set_1d_array(e, LEN_1D, any,frac);
+    } else if (!strcmp(name, "s2251")) {
         set_1d_array(a, LEN_1D,zero,unit);
         set_1d_array(b, LEN_1D, one,unit);
         set_1d_array(c, LEN_1D, any,frac);
@@ -544,6 +574,8 @@ int initialise_arrays(const char* name)
         set_2d_array(aa, any,frac);
         aa[LEN_2D-1][LEN_2D-1] = two;
     } else if (!strcmp(name, "s3111")) {
+        set_1d_array(a, LEN_1D, any,frac);
+    } else if (!strcmp(name, "s31111")) {
         set_1d_array(a, LEN_1D, any,frac);
     } else if (!strcmp(name, "s3112")) {
         set_1d_array(a, LEN_1D, any,frac2);
