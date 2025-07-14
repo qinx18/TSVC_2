@@ -146,8 +146,8 @@ def print_detailed_comparison(comparison, data1, data2):
             print(f" {comp['function']:<15} {status1:<15} {speedup1:<15} {status2:<15} {speedup2:<15}")
 
 if __name__ == "__main__":
-    file1 = "/home/qinxiao/workspace/vectorizer/tsvc_vectorization_results.json"
-    file2 = "/home/qinxiao/workspace/tsvc_vectorization_results.json"
+    file1 = "/home/qinxiao/workspace/vectorizer_3s/tsvc_vectorization_results.json"
+    file2 = "/home/qinxiao/workspace/orig_vectorizer_3s/tsvc_vectorization_results.json"
     
     comparison, data1, data2 = compare_results(file1, file2)
     print_detailed_comparison(comparison, data1, data2)

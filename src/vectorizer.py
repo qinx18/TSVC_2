@@ -52,7 +52,7 @@ class TSVCVectorizerExperiment:
     def __init__(self, api_key):
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model = "claude-sonnet-4-20250514"
-        self.max_iterations = 1
+        self.max_iterations = 3
         self.temperature = 0.7  # Balanced temperature for creative but consistent solutions
         self.results = {}
         
@@ -529,8 +529,7 @@ IMPORTANT TYPE AND DECLARATION CONSTRAINTS:
 
 When doing vectorization analysis, follow these steps:
 1. Simplify the case by setting the loop iterations to a small number and enumerate the process as the code written.
-2. When enumerating, recognize overwrittened assignments and calculations that cancled each other out, remove all these redundant operations,
-   aware the edge cases at the beginning and the end.
+2. When enumerating, recognize overwrittened assignments and calculations that cancled each other out, remove all these redundant operations.
 3. For the rest of operations, identify which element is refered as its original value and which one is refered as its updated value.
    CRITICAL: If a[i] depends on a[j] and j might be overwritten during the loop, you must split the vectorization into phases:
    - Phase 1: Process elements that use original values
@@ -969,7 +968,7 @@ real_t test(real_t* A){
                 [exe_file],
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=30,
                 cwd=src_dir
             )
             
@@ -1462,8 +1461,8 @@ def main():
     experiment = TSVCVectorizerExperiment(api_key)
     
     # Test a few functions first to verify the fix
-    test_functions = ['s112', 's114', 's115', 's116', 's1161']
-    print(f"Testing {len(test_functions)} functions to verify the fix...")
+    # test_functions = ['s1113']
+    # print(f"Testing {len(test_functions)} functions to verify the fix...")
     experiment.run_experiment(functions_to_test=all_functions)
 
 if __name__ == "__main__":
