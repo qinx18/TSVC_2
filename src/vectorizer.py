@@ -525,19 +525,7 @@ IMPORTANT TYPE AND DECLARATION CONSTRAINTS:
 - 1D arrays: a, b, c, d, e are declared as 'real_t a[LEN_1D]' etc.
 - 2D arrays: aa, bb, cc are declared as 'real_t aa[LEN_2D][LEN_2D]' etc.
 - dummy() function signature: int dummy(real_t*, real_t*, real_t*, real_t*, real_t*, real_t(*)[LEN_2D], real_t(*)[LEN_2D], real_t(*)[LEN_2D], real_t)
-- If you need to reference these arrays, do NOT use extern declarations - they are already global
-
-When doing vectorization analysis, follow these steps:
-1. Simplify the case by setting the loop iterations to a small number and enumerate the process as the code written.
-2. When enumerating, recognize and remove overwritten assignments and calculations that cancel each other out to make the dependencies clear.
-3. For the rest of operations, identify which element is referred as its original value and which one is referred as its updated value.
-   CRITICAL: If a[i] depends on a[j] and a[j] might update during the loop, you must split the vectorization into phases:
-   - Phase 1: Process elements that use original values
-   - Phase 2: Process elements that use updated values
-4. Load original values(not updated if executing sequentially like a[i+1]) directly from memory first, then compute elements that use original values, then store these elements.
-   After that, load the updated values from memory, then compute elements that use updated values, finally store these elements.
-5. Make necessary unrolling, loop distribution, loop interchanging, statement reordering based on step 3 & 4. Feel free to optimize and restructure as needed.
-6. Understand the pattern, then generate the actual vectorized code for the full loop range, ensuring final results match the original."""
+- If you need to reference these arrays, do NOT use extern declarations - they are already global"""
     
     def vectorizer_agent(self, func_name, feedback=None):
         """Generate vectorized code using Anthropic API"""
