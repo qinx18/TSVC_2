@@ -481,7 +481,7 @@ class TSVCVectorizerExperiment:
         return result
     
     
-    def get_system_prompt(self, func_name, loop_description, return_expression):
+    def get_system_prompt(self, func_name, return_expression):
         """Generate the system prompt for vectorization"""
         
         # Determine if function needs specific return value
@@ -539,7 +539,7 @@ When doing vectorization analysis, follow these steps:
 5. Make necessary unrolling, loop distribution, loop interchanging, statement reordering based on step 3 & 4. Feel free to optimize and restructure as needed.
 6. Understand the pattern, then generate the actual vectorized code for the full loop range, ensuring final results match the original."""
     
-    def vectorizer_agent(self, source_code, func_name, feedback=None):
+    def vectorizer_agent(self, func_name, feedback=None):
         """Generate vectorized code using Anthropic API"""
         
         # Get return expression for this function
@@ -548,7 +548,7 @@ When doing vectorization analysis, follow these steps:
         # Create generic prompts without function-specific logic
         if feedback is None:
             # Initial attempt - send the whole function instead of just the loop
-            full_function_code = func_data['code']
+            full_function_code = self.test_functions[func_name]['code']
             user_message = f"""
 ```c
 {full_function_code}
@@ -584,7 +584,7 @@ Generate a corrected `{func_name}_vectorized` function that:
 
 Output only the C function, no explanations."""
         
-        system_prompt = self.get_system_prompt(func_name, "function", return_expression)
+        system_prompt = self.get_system_prompt(func_name, return_expression)
         
         try:
             message = self.client.messages.create(
@@ -1192,7 +1192,7 @@ real_t test(real_t* A){
         """Legacy method - redirect to analyze_tsvc_error"""
         return self.analyze_tsvc_error(error_output, func_name)
     
-    def save_iteration_data(self, func_name, iteration, vectorized_code, source_code, feedback):
+    def save_iteration_data(self, func_name, iteration, vectorized_code, feedback):
         """Save all data from this iteration for debugging"""
         # Calculate workspace root consistently
         workspace_root = os.path.join(os.path.dirname(__file__), '../..')
@@ -1207,7 +1207,7 @@ real_t test(real_t* A){
         # Build the complete prompt that was sent to LLM
         
         return_expression = self.test_functions[func_name].get('return_expression', None)
-        system_prompt = self.get_system_prompt(func_name, "function", return_expression)
+        system_prompt = self.get_system_prompt(func_name, return_expression)
         
         if feedback is None:
             # Use the full function code instead of just the loop
@@ -1255,8 +1255,7 @@ Here's what you tried before:
         print(f"Vectorizing {func_name}")
         print(f"{'='*60}")
         
-        # Use full function for vectorization
-        source_to_vectorize = func_data['code']
+        # Note: Full function code is now accessed directly from self.test_functions[func_name]['code']
         
         attempts = []
         feedback = None
@@ -1264,7 +1263,6 @@ Here's what you tried before:
         for iteration in range(1, self.max_iterations + 1):
             # Generate/repair code
             vectorized_code = self.vectorizer_agent(
-                source_to_vectorize, 
                 func_name, 
                 feedback
             )
@@ -1274,7 +1272,7 @@ Here's what you tried before:
                 break
             
             # Save iteration data
-            self.save_iteration_data(func_name, iteration, vectorized_code, source_to_vectorize, feedback)
+            self.save_iteration_data(func_name, iteration, vectorized_code, feedback)
             
             # Test the code
             test_result = self.compiler_tester_agent(func_name, vectorized_code, iteration)
