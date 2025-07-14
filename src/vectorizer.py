@@ -1255,8 +1255,8 @@ Here's what you tried before:
         print(f"Vectorizing {func_name}")
         print(f"{'='*60}")
         
-        # Use core loop for vectorization
-        source_to_vectorize = func_data['core_loop']
+        # Use full function for vectorization
+        source_to_vectorize = func_data['code']
         
         attempts = []
         feedback = None
