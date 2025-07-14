@@ -504,7 +504,7 @@ The vectorized function should:
         
         return f"""You are an expert in SIMD vectorization using AVX2 intrinsics.
 
-Generate a complete C function named `{func_name}_vectorized` that vectorizes this {loop_description} using AVX2 intrinsics. The function should:
+Generate a complete C function named `{func_name}_vectorized` that vectorizes the given original function using AVX2 intrinsics. The function should:
 - Have the exact same signature as the original: real_t {func_name}_vectorized(struct args_t * func_args)
 - Include the same initialization pattern: initialise_arrays(__func__) at the beginning
 - Use gettimeofday(&func_args->t1, NULL) BEFORE the computation loops (NOT local struct timeval variables)
@@ -512,10 +512,10 @@ Generate a complete C function named `{func_name}_vectorized` that vectorizes th
 - DO NOT declare struct timeval variables - use func_args->t1 and func_args->t2 directly
 - Use the existing global arrays (a, b, c, d, e for 1D arrays and aa, bb, cc for 2D arrays) - DO NOT declare new arrays
 - Include any necessary headers like #include <immintrin.h>
-- Include ALL the iteration logic from the original function (including outer loops like 'for (int nl = 0; nl < 2000*iterations; nl++)')
 - Use AVX2 intrinsics (_mm256_ps functions) for 8-element float vectors (NOT _mm256_pd which is for double)
-- Ensure semantic equivalence with the original code
-- Call dummy() function where appropriate to match original behavior
+- Ensure the final state of all arrays, variables, and return value match the original function
+- Call dummy() function the same number of times with the same arguments as the original
+- You may freely optimize, reorder, restructure, or eliminate redundant operations as long as the final results are identical
 
 {return_info}
 
@@ -529,15 +529,15 @@ IMPORTANT TYPE AND DECLARATION CONSTRAINTS:
 
 When doing vectorization analysis, follow these steps:
 1. Simplify the case by setting the loop iterations to a small number and enumerate the process as the code written.
-2. When enumerating, recognize overwrittened assignments and calculations that cancled each other out, remove all these redundant operations.
-3. For the rest of operations, identify which element is refered as its original value and which one is refered as its updated value.
-   CRITICAL: If a[i] depends on a[j] and j might be overwritten during the loop, you must split the vectorization into phases:
+2. When enumerating, recognize and remove overwritten assignments and calculations that cancel each other out to make the dependencies clear.
+3. For the rest of operations, identify which element is referred as its original value and which one is referred as its updated value.
+   CRITICAL: If a[i] depends on a[j] and a[j] might update during the loop, you must split the vectorization into phases:
    - Phase 1: Process elements that use original values
    - Phase 2: Process elements that use updated values
 4. Load original values(not updated if executing sequentially like a[i+1]) directly from memory first, then compute elements that use original values, then store these elements.
    After that, load the updated values from memory, then compute elements that use updated values, finally store these elements.
-5. Making necessary redundancy removing based on step 2, and necessary unlooping, loop distribution, loop interchanging, statement reordering based on step 3 & 4.
-6. Understand the pattern, then generate the actual vectorized code for the full loop range."""
+5. Make necessary unrolling, loop distribution, loop interchanging, statement reordering based on step 3 & 4. Feel free to optimize and restructure as needed.
+6. Understand the pattern, then generate the actual vectorized code for the full loop range, ensuring final results match the original."""
     
     def vectorizer_agent(self, source_code, func_name, feedback=None):
         """Generate vectorized code using Anthropic API"""
@@ -545,25 +545,13 @@ When doing vectorization analysis, follow these steps:
         # Get return expression for this function
         return_expression = self.test_functions[func_name].get('return_expression', None)
         
-        # Check if this is a nested loop that needs context
-        needs_outer_context = 'j < i' in source_code or ('i' in source_code and 'for' in source_code and 'int i' not in source_code)
-        
-        if needs_outer_context:
-            # Provide the nested loop context
-            source_with_context = f"""for (int i = 0; i < LEN_2D; i++) {{
-    {source_code}
-}}"""
-            loop_description = f"nested loop where the inner loop is:\n{source_code}\nand it's inside an outer loop over i"
-        else:
-            source_with_context = source_code
-            loop_description = f"loop:\n{source_code}"
-        
         # Create generic prompts without function-specific logic
         if feedback is None:
-            # Initial attempt
+            # Initial attempt - send the whole function instead of just the loop
+            full_function_code = func_data['code']
             user_message = f"""
 ```c
-{source_with_context}
+{full_function_code}
 ```
 """
         else:
@@ -592,11 +580,11 @@ Here's what you tried before:
 Generate a corrected `{func_name}_vectorized` function that:
 - Fixes the error
 - Has the correct signature: real_t {func_name}_vectorized(struct args_t * func_args)
-- Correctly vectorizes the {loop_description}
+- Correctly vectorizes the given function
 
 Output only the C function, no explanations."""
         
-        system_prompt = self.get_system_prompt(func_name, loop_description, return_expression)
+        system_prompt = self.get_system_prompt(func_name, "function", return_expression)
         
         try:
             message = self.client.messages.create(
@@ -1109,7 +1097,7 @@ real_t test(real_t* A){
         
         # Functions that require struct{real_t a; real_t b;} * arg_info
         real_t_struct_functions = {
-            's242': {'a': 1.0, 'b': 1.0},  # s1 = 1, s2 = 1
+            's242': {'a': 1.0, 'b': 2.0},  # s1 = 1, s2 = 2
         }
         
         # Functions that require int * arg_info  
@@ -1118,6 +1106,7 @@ real_t test(real_t* A){
             's171': 1,      # inc = 1  
             's174': 10,     # M = 10
             's175': 1,      # inc = 1
+            's318': 1,      # inc = 1
         }
         
         # Functions that require struct{int a; int b;} * arg_info
@@ -1149,7 +1138,7 @@ real_t test(real_t* A){
     func_args_orig.arg_info = &s242_args;
     func_args_vec.arg_info = &s242_args;"""
         
-        elif func_name in ['s162', 's171', 's174', 's175']:
+        elif func_name in ['s162', 's171', 's174', 's175', 's318']:
             # int * arg_info
             return f"""// Set up arguments for {func_name}: int
     static int {func_name}_arg = {args};
@@ -1216,22 +1205,17 @@ real_t test(real_t* A){
             f.write(vectorized_code)
         
         # Build the complete prompt that was sent to LLM
-        # Determine loop description for the system prompt
-        if feedback is None:
-            loop_description = f"loop:\n{source_code}"
-        else:
-            # For repair attempts, we need to reconstruct the loop description
-            # This is a simplified version since we don't have all the context here
-            loop_description = "loop"
         
         return_expression = self.test_functions[func_name].get('return_expression', None)
-        system_prompt = self.get_system_prompt(func_name, loop_description, return_expression)
+        system_prompt = self.get_system_prompt(func_name, "function", return_expression)
         
         if feedback is None:
+            # Use the full function code instead of just the loop
+            full_function = self.test_functions[func_name]['code']
             user_prompt = f"""
 
 ```c
-{source_code}
+{full_function}
 ```
 
 """
@@ -1460,9 +1444,7 @@ def main():
     
     experiment = TSVCVectorizerExperiment(api_key)
     
-    # Test a few functions first to verify the fix
-    # test_functions = ['s1113']
-    # print(f"Testing {len(test_functions)} functions to verify the fix...")
+    # Run all functions
     experiment.run_experiment(functions_to_test=all_functions)
 
 if __name__ == "__main__":
