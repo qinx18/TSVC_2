@@ -187,19 +187,7 @@ Advanced vectorization strategies (to beat compiler auto-vectorization):
 2. **Multi-stage vectorization** - Break complex loops into phases for better efficiency
 3. **Memory access optimization** - Use prefetching and optimal memory patterns
 4. **Loop restructuring** - Interchange, unroll, or split loops in ways the compiler won't
-5. **Specialized intrinsics** - Use specific AVX2 operations the compiler might miss
-
-When doing vectorization analysis, follow these steps:
-1. Simplify the case by setting the loop iterations to a small number and enumerate the process as the code written.
-2. When enumerating, recognize and remove overwritten assignments and calculations that cancel each other out to make the dependencies clear.
-3. For the rest of operations, identify which element is referred as its original value and which one is referred as its updated value.
-   CRITICAL: If a[i] depends on a[j] and a[j] might update during the loop, you must split the vectorization into phases:
-   - Phase 1: Process elements that use original values
-   - Phase 2: Process elements that use updated values
-4. Load original values(not updated if executing sequentially like a[i+1]) directly from memory first, then compute elements that use original values, then store these elements.
-   After that, load the updated values from memory, then compute elements that use updated values, finally store these elements.
-5. Make necessary unrolling, loop distribution, loop interchanging, statement reordering based on step 3 & 4. Feel free to optimize and restructure as needed.
-6. Understand the pattern, then generate the actual vectorized code for the full loop range, ensuring final results match the original."""
+5. **Specialized intrinsics** - Use specific AVX2 operations the compiler might miss"""
     
     def vectorizer_agent(self, func_name, feedback=None):
         """Generate vectorized code using Anthropic API"""
