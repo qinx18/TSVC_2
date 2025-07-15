@@ -165,12 +165,15 @@ Given the following original TSVC function:
 {full_function_code}
 ```
 
-Generate a vectorized version named `{func_name}_vectorized` that:
+**CHALLENGE**: Your vectorized version must OUTPERFORM the compiler's auto-vectorization. The baseline is compiled with GCC -O3 -ftree-vectorize, so the compiler will attempt its own vectorization. Your manual vectorization must be better than what the compiler produces.
+
+Generate a vectorized version named `$func_name_vectorized` that:
 
 1. **Preserves the exact same behavior** as the original function
 2. **Uses AVX2 intrinsics** (_mm256_* functions) for vectorization
 3. **Returns the same value**: {return_expression}
-4. **Maintains the same function signature**: real_t {func_name}_vectorized(struct args_t * func_args)
+4. **Maintains the same function signature**: real_t $func_name_vectorized(struct args_t * func_args)
+5. **Outperforms compiler auto-vectorization** - focus on patterns the compiler struggles with
 
 Key requirements based on the original function:
 - Arrays used: {', '.join(func_analysis['arrays_used'])}
@@ -179,12 +182,12 @@ Key requirements based on the original function:
 - Call dummy() the same number of times as the original (typically inside the 'nl' loop)
 - Arrays are already declared globally - do NOT redeclare them
 
-Vectorization approach:
-1. Analyze data dependencies in the loops
-2. Use 8-wide float vectors (_mm256_ps for real_t which is float)
-3. Handle loop remainders properly
-4. Ensure memory alignment when possible
-5. Preserve the exact computation order where it affects results
+Advanced vectorization strategies (to beat compiler auto-vectorization):
+1. **Complex dependency analysis** - Manually handle dependencies the compiler can't optimize
+2. **Multi-stage vectorization** - Break complex loops into phases for better efficiency
+3. **Memory access optimization** - Use prefetching and optimal memory patterns
+4. **Loop restructuring** - Interchange, unroll, or split loops in ways the compiler won't
+5. **Specialized intrinsics** - Use specific AVX2 operations the compiler might miss
 
 When doing vectorization analysis, follow these steps:
 1. Simplify the case by setting the loop iterations to a small number and enumerate the process as the code written.
@@ -232,6 +235,20 @@ Previous incorrect attempt:
 {feedback.get('previous_code', '')}
 
 Generate a properly vectorized version using AVX2 intrinsics."""
+            elif feedback['error_type'] == 'execution_time_zero':
+                user_message = f"""The previous attempt had both original and vectorized versions execute in 0.000000 seconds, indicating the compiler optimized away the computation:
+
+{feedback.get('test_output', '')}
+
+This suggests the compiler eliminated the entire loop because it detected no meaningful side effects. To fix this:
+
+1. Ensure the dummy() function is called with the computed result (not a constant)
+2. Make sure the loop variable and intermediate results are actually used
+3. Consider adding __attribute__((noinline)) to prevent function inlining
+4. Use volatile keywords for critical variables if needed
+5. Ensure the return value depends on the actual computation
+
+Generate a corrected vectorized function that cannot be optimized away by the compiler."""
             else:
                 user_message = f"""The previous attempt had an error:
 {feedback.get('error_message', 'Unknown error')}
@@ -311,9 +328,11 @@ Please fix the issue and generate a corrected vectorized function."""
         variable_declarations = ""
         
         # Create minimal test harness that leverages existing TSVC infrastructure
-        minimal_tsvc = """
+        from string import Template
+        
+        minimal_tsvc_template = Template("""
 /*
- * Minimal test harness for {func_name} using existing TSVC infrastructure
+ * Minimal test harness for $func_name using existing TSVC infrastructure
  * This leverages common.c, array_defs.h, and follows tsvc_orig.c patterns
  */
 
@@ -333,83 +352,101 @@ __attribute__((aligned(ARRAY_ALIGNMENT))) int indx[LEN_1D];
 real_t* __restrict__ xx;
 real_t* yy;
 
-{variable_declarations}
+$variable_declarations
 
-// Dummy function (from dummy.c)
+// Dummy function declaration (actual implementation in dummy.c)
 int dummy(real_t a[LEN_1D], real_t b[LEN_1D], real_t c[LEN_1D], real_t d[LEN_1D], real_t e[LEN_1D],
-          real_t aa[LEN_2D][LEN_2D], real_t bb[LEN_2D][LEN_2D], real_t cc[LEN_2D][LEN_2D], real_t s) {{
-    // Called in each loop to make all computations appear required
-    return 0;
-}}
+          real_t aa[LEN_2D][LEN_2D], real_t bb[LEN_2D][LEN_2D], real_t cc[LEN_2D][LEN_2D], real_t s);
 
-{additional_functions}
+$additional_functions
 
 // Original function from tsvc.c
-{original_func}
+$original_func
 
 // Vectorized version
-{vectorized_func}
+$vectorized_func
 
 // Test function using the clean TSVC pattern
-void test_{func_name}_comparison() {{
-    struct args_t func_args_orig = {{0}};
-    struct args_t func_args_vec = {{0}};
+void test_${func_name}_comparison() {
+    struct args_t func_args_orig = {0};
+    struct args_t func_args_vec = {0};
     
-    {argument_setup}
+    $argument_setup
     
-    printf("Testing {func_name}:\\n");
+    printf("Testing $func_name:\\n");
     printf("Function\\tTime(sec)\\tChecksum\\n");
     
     // Test original version
-    real_t checksum_orig = {func_name}(&func_args_orig);
+    real_t checksum_orig = $func_name(&func_args_orig);
     double time_orig = (func_args_orig.t2.tv_sec - func_args_orig.t1.tv_sec) +
                       (func_args_orig.t2.tv_usec - func_args_orig.t1.tv_usec) / 1000000.0;
-    printf("{func_name}_orig\\t%10.6f\\t%f\\n", time_orig, checksum_orig);
+    printf("${func_name}_orig\\t%10.6f\\t%f\\n", time_orig, checksum_orig);
     
     // Test vectorized version
-    real_t checksum_vec = {func_name}_vectorized(&func_args_vec);
+    real_t checksum_vec = ${func_name}_vectorized(&func_args_vec);
     double time_vec = (func_args_vec.t2.tv_sec - func_args_vec.t1.tv_sec) +
                      (func_args_vec.t2.tv_usec - func_args_vec.t1.tv_usec) / 1000000.0;
-    printf("{func_name}_vec\\t%10.6f\\t%f\\n", time_vec, checksum_vec);
+    printf("${func_name}_vec\\t%10.6f\\t%f\\n", time_vec, checksum_vec);
     
     // Compare results
     double checksum_diff = fabs(checksum_orig - checksum_vec);
-    double speedup = time_orig / time_vec;
+    double speedup;
+    
+    // Handle case where execution time is too small to measure
+    if (time_vec <= 0.0 && time_orig <= 0.0) {
+        speedup = 0.0;  // Both versions too fast to measure
+    } else if (time_vec <= 0.0) {
+        speedup = 999.99;  // Vectorized version is extremely fast
+    } else if (time_orig <= 0.0) {
+        speedup = 0.0;  // Original version too fast, vectorized slower
+    } else {
+        speedup = time_orig / time_vec;
+    }
     
     printf("\\nComparison Results:\\n");
     printf("Checksum difference: %e\\n", checksum_diff);
-    printf("Speedup: %.2fx\\n", speedup);
+    if (time_vec <= 0.0 && time_orig <= 0.0) {
+        printf("Speedup: N/A (both execution times too small to measure)\\n");
+    } else if (time_vec <= 0.0) {
+        printf("Speedup: %.2fx\\n", speedup);
+    } else if (time_orig <= 0.0) {
+        printf("Speedup: 0.00x (original too fast, vectorized slower)\\n");
+    } else {
+        printf("Speedup: %.2fx\\n", speedup);
+    }
     
-    if (checksum_diff < 1e-5) {{
+    if (checksum_diff < 1e-5) {
         printf("CORRECTNESS: PASS\\n");
-    }} else {{
+    } else {
         printf("CORRECTNESS: FAIL\\n");
-    }}
+    }
     
-    if (speedup > 1.0) {{
+    if (speedup > 1.0) {
         printf("PERFORMANCE: IMPROVED\\n");
-    }} else {{
+    } else {
         printf("PERFORMANCE: NO IMPROVEMENT\\n");
-    }}
-}}
+    }
+}
 
-int main(int argc, char ** argv){{
+int main(int argc, char ** argv){
     int* ip;
     real_t s1, s2;
     init(&ip, &s1, &s2);  // Use existing initialization from common.c
     
-    test_{func_name}_comparison();
+    test_${func_name}_comparison();
     
     return EXIT_SUCCESS;
-}}
-""".format(
-    func_name=func_name,
-    original_func=original_func,
-    vectorized_func=vectorized_func,
-    additional_functions=additional_functions,
-    variable_declarations=variable_declarations,
-    argument_setup=self._generate_argument_setup(func_name)
-)
+}
+""")
+        
+        minimal_tsvc = minimal_tsvc_template.substitute(
+            func_name=func_name,
+            original_func=original_func,
+            vectorized_func=vectorized_func,
+            additional_functions=additional_functions,
+            variable_declarations=variable_declarations,
+            argument_setup=self._generate_argument_setup(func_name)
+        )
         
         return minimal_tsvc
     
@@ -419,8 +456,9 @@ int main(int argc, char ** argv){{
             # s31111 needs the test function
             return """
 // Additional function needed for s31111
+__attribute__((noinline))
 real_t test(real_t* A){
- real_t s = (real_t)0.0;
+ volatile real_t s = (real_t)0.0;
  for (int i = 0; i < 4; i++)
    s += A[i];
  return s;
@@ -548,17 +586,26 @@ real_t test(real_t* A){
         script_dir = os.path.dirname(os.path.abspath(__file__))
         src_dir = script_dir  # Script is in the src directory
         common_c_path = os.path.join(src_dir, 'common.c')
+        dummy_c_path = os.path.join(src_dir, 'dummy.c')
         
+        # Compile with full optimization including auto-vectorization
+        # Key: Test if LLM can do better than compiler's auto-vectorization
+        # This creates a realistic baseline where compiler does its best vectorization
         compile_result = subprocess.run([
             'gcc',
-            '-mavx2',
-            '-mfma',
-            '-lm',
-            '-O2',
-            '-I', src_dir,  # Use src directory for headers
+            '-std=c99',
+            '-O3',                  # High optimization level like TSVC_2
+            '-fstrict-aliasing',    # Enable strict aliasing optimization 
+            '-fivopts',             # Enable if-conversion optimization
+            '-ftree-vectorize',     # Enable auto-vectorization - LLM must beat compiler
+            '-mavx2',               # Enable AVX2 for intrinsics
+            '-mfma',                # Enable FMA for intrinsics
+            '-I', src_dir,          # Use src directory for headers
             '-o', exe_file,
             modified_tsvc_path,
-            common_c_path  # Full path to common.c
+            common_c_path,          # Full path to common.c
+            dummy_c_path,           # Full path to dummy.c - separate compilation unit
+            '-lm'
         ], capture_output=True, text=True, cwd=src_dir)
         
         if compile_result.returncode != 0:
@@ -590,6 +637,28 @@ real_t test(real_t* A){
             
             # Parse the output to extract performance data
             performance_data = self.parse_performance_output(run_result.stdout)
+            
+            # Check for zero execution time (compiler optimization issue)
+            if self._is_zero_execution_time(run_result.stdout):
+                return {
+                    'success': False,
+                    'error_type': 'execution_time_zero',
+                    'error_message': 'Both original and vectorized versions executed in 0.000000 seconds, suggesting compiler optimization eliminated the computation',
+                    'test_output': run_result.stdout,
+                    'hint': 'The compiler likely optimized away the entire computation. Ensure the vectorized function has meaningful work that cannot be eliminated. Check that: 1) The dummy() function is called properly with the computed result, 2) The loop variable and computations are actually used, 3) Consider adding __attribute__((noinline)) or volatile keywords to prevent optimization.',
+                    'performance_data': performance_data
+                }
+            
+            # Check for suspiciously fast baseline (potential optimization issue)
+            if self._is_baseline_suspiciously_fast(performance_data):
+                return {
+                    'success': False,
+                    'error_type': 'baseline_too_fast',
+                    'error_message': 'Original version executed suspiciously fast, suggesting unintended compiler optimization',
+                    'test_output': run_result.stdout,
+                    'hint': 'The baseline (original) function is running too fast for the amount of work it should be doing. This suggests the compiler may have optimized it in ways that make comparison unfair. Consider using volatile variables or compiler barriers to ensure the computation actually happens.',
+                    'performance_data': performance_data
+                }
             
             # Check if the test passed based on correctness
             if "CORRECTNESS: PASS" in run_result.stdout:
@@ -662,6 +731,63 @@ real_t test(real_t* A){
                 'performance_data': None
             }
     
+    def _is_zero_execution_time(self, output):
+        """Check if both original and vectorized versions have zero execution time"""
+        
+        # Look for timing data in the output
+        timing_lines = []
+        for line in output.split('\n'):
+            if '\t' in line and 'Time(sec)' not in line:
+                # This should be a timing data line
+                parts = line.split('\t')
+                if len(parts) >= 2:
+                    timing_lines.append(parts)
+        
+        # Check if we have exactly 2 timing lines (original and vectorized)
+        if len(timing_lines) != 2:
+            return False
+        
+        # Extract execution times (timing is in the 3rd column, index 2)
+        try:
+            orig_time = float(timing_lines[0][2].strip())
+            vec_time = float(timing_lines[1][2].strip())
+            
+            # Check if both times are zero (or very close to zero)
+            # Only flag as error when BOTH are zero, not just one
+            return orig_time <= 0.000001 and vec_time <= 0.000001
+        except (ValueError, IndexError):
+            return False
+    
+    def _is_baseline_suspiciously_fast(self, performance_data):
+        """Check if baseline execution time is suspiciously fast, indicating unwanted compiler optimization"""
+        if not performance_data or performance_data.get('original_time') is None:
+            return False
+        
+        orig_time = performance_data['original_time']
+        
+        # If time is exactly zero or very close to zero, it's suspicious
+        if orig_time <= 0.000001:
+            return True
+        
+        # With -O3 -ftree-vectorize, baseline should be well-optimized but still measurable
+        # If it's extremely fast, the compiler likely optimized away the computation entirely
+        if orig_time < 0.00001:  # Less than 0.01 milliseconds is suspicious even with auto-vectorization
+            return True
+        
+        # NOTE: With auto-vectorization enabled, we expect smaller speedups or even slowdowns
+        # The goal is to test if LLM can beat compiler's vectorization, not just any vectorization
+        # So we're more lenient with the ratio check since compiler baseline is already optimized
+        if performance_data.get('vectorized_time') is not None:
+            vec_time = performance_data['vectorized_time']
+            if vec_time > 0 and orig_time > 0:
+                ratio = vec_time / orig_time
+                # If vectorized version is more than 50x slower than auto-vectorized original,
+                # something is seriously wrong (likely computation was eliminated)
+                if ratio > 50.0:
+                    return True
+        
+        return False
+    
     def parse_performance_output(self, output):
         """Parse the performance output from the modified tsvc.c"""
         performance_data = {
@@ -681,10 +807,10 @@ real_t test(real_t* A){
             if '_orig' in line and '\t' in line:
                 # Parse original function results
                 parts = line.split('\t')
-                if len(parts) >= 3:
+                if len(parts) >= 4:
                     try:
-                        time_str = parts[1].strip()
-                        checksum_str = parts[2].strip()
+                        time_str = parts[2].strip()
+                        checksum_str = parts[3].strip()
                         performance_data['original_time'] = float(time_str)
                         performance_data['original_checksum'] = float(checksum_str)
                     except (ValueError, IndexError):
@@ -692,10 +818,10 @@ real_t test(real_t* A){
             elif '_vec' in line and '\t' in line:
                 # Parse vectorized function results
                 parts = line.split('\t')
-                if len(parts) >= 3:
+                if len(parts) >= 4:
                     try:
-                        time_str = parts[1].strip()
-                        checksum_str = parts[2].strip()
+                        time_str = parts[2].strip()
+                        checksum_str = parts[3].strip()
                         performance_data['vectorized_time'] = float(time_str)
                         performance_data['vectorized_checksum'] = float(checksum_str)
                     except (ValueError, IndexError):
