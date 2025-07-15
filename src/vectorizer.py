@@ -89,177 +89,12 @@ class TSVCVectorizerExperiment:
                 full_function = f"real_t {func_name}(struct args_t * func_args)\n{{\n{func_match.group(1)}\n}}"
                 func_body = func_match.group(1)
                 
-                
-                # Find ALL for loops, including nested ones
-                # Use regex to find all for loop headers - handle nested parentheses
-                all_for_headers = []
-                
-                # Find all 'for' keywords first
-                for_positions = []
-                for match in re.finditer(r'\bfor\s*\(', func_body):
-                    for_positions.append(match.start())
-                
-                # For each 'for' position, find the complete header by counting parentheses
-                for start_pos in for_positions:
-                    # Find the opening parenthesis
-                    paren_start = func_body.find('(', start_pos)
-                    if paren_start == -1:
-                        continue
-                    
-                    # Count parentheses to find the matching closing one
-                    paren_count = 0
-                    pos = paren_start
-                    while pos < len(func_body):
-                        if func_body[pos] == '(':
-                            paren_count += 1
-                        elif func_body[pos] == ')':
-                            paren_count -= 1
-                            if paren_count == 0:
-                                # Found the complete for header
-                                header = func_body[start_pos:pos+1]
-                                all_for_headers.append({
-                                    'header': header,
-                                    'start': start_pos,
-                                    'end': pos+1
-                                })
-                                break
-                        pos += 1
-                
-                
-                # Now extract complete loops
-                loops = []
-                for header_info in all_for_headers:
-                    # Find the opening brace after this for statement
-                    pos = header_info['end']
-                    while pos < len(func_body) and func_body[pos] in ' \t\n':
-                        pos += 1
-                    
-                    if pos < len(func_body) and func_body[pos] == '{':
-                        # Extract the complete loop by counting braces
-                        brace_count = 0
-                        start_pos = header_info['start']
-                        i = pos
-                        
-                        while i < len(func_body):
-                            if func_body[i] == '{':
-                                brace_count += 1
-                            elif func_body[i] == '}':
-                                brace_count -= 1
-                                if brace_count == 0:
-                                    loop_text = func_body[start_pos:i+1]
-                                    loops.append({
-                                        'text': loop_text,
-                                        'header': header_info['header'],
-                                        'start': start_pos,
-                                        'end': i+1,
-                                        'depth': func_body[:start_pos].count('for')  # Rough depth estimate
-                                    })
-                                    break
-                            i += 1
-                
-                
-                # Now find the computational loop
-                # For nested structures (like s114), we want the complete nested structure
-                # For single loops (like s1113), we want just that loop
-                
-                core_loop = None
-                
-                # Sort loops by depth (outermost first)
-                loops.sort(key=lambda x: x['depth'])
-                
-                # Look for computational loops
-                computational_loops = []
-                for loop in loops:
-                    # Check if it has array operations OR function calls (computational criteria)
-                    has_array_ops = re.search(r'\w+\[[^\]]+\]', loop['text'])
-                    has_function_calls = re.search(r'\b(?!dummy|gettimeofday|printf|initialise_arrays|calc_checksum)\w+\s*\([^)]*\)', loop['text'])
-                    
-                    if has_array_ops or has_function_calls:
-                        # Don't skip loops that contain dummy calls - they might still be computational
-                        # The dummy call is typically at the end and doesn't affect the core computation
-                        computational_loops.append(loop)
-                
-                # If no computational loops found, but we have 'nl' loops with function calls, include them
-                # This handles cases like s31111 where the 'nl' loop IS the computational loop
-                if not computational_loops:
-                    for loop in loops:
-                        if 'nl' in loop['header']:
-                            # Check if this 'nl' loop has computational content (function calls)
-                            has_function_calls = re.search(r'\b(?!dummy|gettimeofday|printf|initialise_arrays|calc_checksum)\w+\s*\([^)]*\)', loop['text'])
-                            if has_function_calls:
-                                computational_loops.append(loop)
-                
-                
-                if computational_loops:
-                    # For nested loops, we want the outermost computational loop
-                    # that contains all the nested computational loops
-                    if len(computational_loops) > 1:
-                        # Check if loops are nested
-                        outermost = computational_loops[0]
-                        all_nested = True
-                        for other in computational_loops[1:]:
-                            if not (other['start'] > outermost['start'] and other['end'] < outermost['end']):
-                                all_nested = False
-                                break
-                        
-                        if all_nested:
-                            # Use the outermost computational loop (contains all nested ones)
-                            core_loop = outermost['text']
-                        else:
-                            # Not all nested, pick the last one (likely the innermost)
-                            core_loop = computational_loops[-1]['text']
-                    else:
-                        # Single computational loop
-                        core_loop = computational_loops[0]['text']
-                
-                if not core_loop:
-                    core_loop = "// No computational loop found"
-                
-                # Store the original core loop BEFORE adding declarations
-                original_core_loop = core_loop
-                
-                # Clean up the loop formatting first
-                if core_loop and core_loop != "// No computational loop found":
-                    # Normalize whitespace
-                    lines = core_loop.split('\n')
-                    cleaned_lines = []
-                    indent_level = 0
-                    for line in lines:
-                        stripped = line.strip()
-                        if stripped:
-                            if '}' in stripped and '{' not in stripped:
-                                # Line with closing brace(s)
-                                closes = stripped.count('}')
-                                indent_level -= closes
-                                cleaned_lines.append('    ' * indent_level + stripped)
-                            elif '{' in stripped and '}' not in stripped:
-                                # Line with opening brace(s)
-                                cleaned_lines.append('    ' * indent_level + stripped)
-                                opens = stripped.count('{')
-                                indent_level += opens
-                            elif '{' in stripped and '}' in stripped:
-                                # Line with both
-                                cleaned_lines.append('    ' * indent_level + stripped)
-                                indent_level += stripped.count('{') - stripped.count('}')
-                            else:
-                                # Regular line
-                                cleaned_lines.append('    ' * indent_level + stripped)
-                    
-                    original_core_loop = '\n'.join(cleaned_lines)
-                
-                # Add missing variable declarations to create a version with declarations
-                core_loop_with_decls = original_core_loop
-                if original_core_loop and original_core_loop != "// No computational loop found":
-                    core_loop_with_decls = self.add_missing_declarations(original_core_loop, func_body)
-                
                 # Extract the return statement from the original function
                 return_match = re.search(r'return\s+([^;]+);', func_body)
                 return_expression = return_match.group(1) if return_match else None
                 
                 functions[func_name] = {
                     'code': full_function,
-                    'core_loop': original_core_loop,  # Store the clean original without declarations
-                    'core_loop_with_decls': core_loop_with_decls,  # Store version with declarations if needed
                     'return_expression': return_expression
                 }
                 
@@ -269,310 +104,115 @@ class TSVCVectorizerExperiment:
         
         return functions
     
-    def add_missing_declarations(self, core_loop, func_body):
-        """Add missing variable declarations to the extracted loop with recursive dependency resolution"""
+    def analyze_function(self, function_code):
+        """Analyze the function to extract key information"""
         import re
         
-        # Find variables used in the core loop
-        used_vars = set()
-        used_arrays = set()
+        # Find arrays used in the function
+        arrays_used = set()
+        # 1D arrays
+        for array in ['a', 'b', 'c', 'd', 'e']:
+            if re.search(rf'\b{array}\[', function_code):
+                arrays_used.add(array)
+        # 2D arrays
+        for array in ['aa', 'bb', 'cc']:
+            if re.search(rf'\b{array}\[', function_code):
+                arrays_used.add(array)
         
-        # Look for variable usage patterns (assignments, array indices, etc.)
-        var_patterns = [
-            r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\+\+',  # k++
-            r'\+\+\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',  # ++k
-            r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*--',    # k--
-            r'--\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',    # --k
-            r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*=',     # k =
-            r'=\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',     # = k
-            r'\[\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\]', # [k]
-            r'\[\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\]\s*\[', # [k][...] - multi-dimensional arrays
-            r'\[\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*[-+]', # [k-1] or [k+1]
-            r'\+\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',    # + s1
-            r'-\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',     # - s1
-            r'\*\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',    # * s1
-            r'/\s*([a-zA-Z_][a-zA-Z0-9_]*)\b',     # / s1
-        ]
-        
-        # Look for array usage patterns
-        array_patterns = [
-            r'\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\[',    # array[index]
-        ]
-        
-        for pattern in var_patterns:
-            matches = re.findall(pattern, core_loop)
-            for match in matches:
-                # Skip type names that might be incorrectly captured as variables
-                if match in ['real_t', 'int', 'float', 'double', 'char', 'void']:
-                    continue
-                # Skip common array names and loop variables that are typically declared in for loops
-                # But be smarter about 'i' and 'j' - only skip them if they're actually declared in for loops
-                elif match in ['a', 'b', 'c', 'd', 'e', 'aa', 'bb', 'cc', 'nl']:
-                    continue
-                # Skip function names and macro names
-                elif match in ['test', 'dummy', 'gettimeofday', 'printf', 'initialise_arrays', 'calc_checksum', 'iterations', 'LEN_1D', 'LEN_2D', 'ARRAY_ALIGNMENT']:
-                    continue
-                elif match in ['i', 'j']:
-                    # Check if this variable is declared in a for loop in the core loop
-                    for_loop_pattern = rf'for\s*\([^)]*\b{match}\s*='
-                    if not re.search(for_loop_pattern, core_loop):
-                        # Not declared in a for loop, so it needs declaration
-                        used_vars.add(match)
-                else:
-                    # Include all other variables (like s1, s2, etc.)
-                    used_vars.add(match)
-        
-        for pattern in array_patterns:
-            matches = re.findall(pattern, core_loop)
-            for match in matches:
-                # Check if this might be a global array (not a simple variable)
-                if '_' in match or len(match) > 2:  # Likely global arrays like flat_2d_array
-                    used_arrays.add(match)
-        
-        # Recursively resolve variable dependencies
-        all_required_vars = self.resolve_variable_dependencies(used_vars, func_body)
-        
-        # Find declarations and build dependency-ordered list
-        declarations = self.build_ordered_declarations(all_required_vars, func_body)
-        
-        # Add declarations before the core loop (not inside it)
-        if declarations:
-            # Prepend declarations before the loop
-            core_loop = '\n'.join(declarations) + '\n' + core_loop
-        
-        return core_loop
+        return {
+            'arrays_used': sorted(list(arrays_used))
+        }
     
-    def resolve_variable_dependencies(self, initial_vars, func_body):
-        """Recursively resolve variable dependencies to find all required variables"""
-        import re
+    def get_system_prompt(self, func_name, full_function_code):
+        """Generate the system prompt for vectorization with the original function included"""
         
-        all_vars = set(initial_vars)
-        to_process = set(initial_vars)
-        processed = set()
+        # Extract return expression from the function code
+        return_match = re.search(r'return\s+([^;]+);', full_function_code)
+        return_expression = return_match.group(1) if return_match else None
         
-        while to_process:
-            var = to_process.pop()
-            if var in processed:
-                continue
-            processed.add(var)
-            
-            # Find initialization of this variable
-            init_matches = re.findall(rf'\b{var}\s*=\s*([^;]+);', func_body)
-            for init in init_matches:
-                init = init.strip()
-                # Skip increment/decrement and complex expressions
-                if re.match(r'^.*[\+\-]{2}.*$', init) or '->' in init or 'func_args' in init:
-                    continue
-                
-                # Find variables referenced in this initialization
-                referenced_vars = re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b', init)
-                for ref_var in referenced_vars:
-                    # Skip constants, type names, array names, function names, and already processed variables
-                    if (ref_var.isdigit() or
-                        ref_var in ['real_t', 'int', 'float', 'double', 'char', 'void'] or
-                        ref_var in ['a', 'b', 'c', 'd', 'e', 'aa', 'bb', 'cc', 'nl'] or
-                        ref_var in ['test', 'dummy', 'gettimeofday', 'printf', 'initialise_arrays', 'calc_checksum', 'iterations', 'LEN_1D', 'LEN_2D', 'ARRAY_ALIGNMENT'] or
-                        ref_var in processed):
-                        continue
-                    
-                    # Add to required variables if not already present
-                    if ref_var not in all_vars:
-                        all_vars.add(ref_var)
-                        to_process.add(ref_var)
-        
-        return all_vars
-    
-    def build_ordered_declarations(self, all_vars, func_body):
-        """Build variable declarations in dependency order"""
-        import re
-        
-        declarations = []
-        var_dependencies = {}
-        var_initializations = {}
-        
-        # First pass: collect all variable information
-        for var in all_vars:
-            # Look for variable declarations or initializations
-            decl_pattern1 = rf'\b(int|real_t|float)\s+{var}\s*(?:=\s*[^;]+)?;'
-            
-            # Find declaration type
-            func_decl_match = re.search(decl_pattern1, func_body)
-            var_type = 'int'  # default
-            if func_decl_match:
-                var_type = func_decl_match.group(1)
-            
-            # Find initialization
-            init_matches = re.findall(rf'\b{var}\s*=\s*([^;]+);', func_body)
-            valid_init = None
-            dependencies = set()
-            
-            for init in init_matches:
-                init = init.strip()
-                # Skip increment/decrement and complex expressions
-                if (re.match(r'^.*[\+\-]{2}.*$', init) or
-                    '->' in init or
-                    'func_args' in init):
-                    continue
-                
-                # This is a valid initialization
-                valid_init = init
-                
-                # Find dependencies in this initialization
-                referenced_vars = re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b', init)
-                for ref_var in referenced_vars:
-                    if (not ref_var.isdigit() and
-                        ref_var not in ['real_t', 'int', 'float', 'double', 'char', 'void'] and
-                        ref_var not in ['a', 'b', 'c', 'd', 'e', 'aa', 'bb', 'cc', 'nl'] and
-                        ref_var not in ['test', 'dummy', 'gettimeofday', 'printf', 'initialise_arrays', 'calc_checksum', 'iterations', 'LEN_1D', 'LEN_2D', 'ARRAY_ALIGNMENT'] and
-                        ref_var in all_vars and ref_var != var):
-                        dependencies.add(ref_var)
-                break  # Use first valid initialization
-            
-            var_dependencies[var] = dependencies
-            var_initializations[var] = (var_type, valid_init)
-        
-        # Second pass: topological sort to order declarations
-        ordered_vars = self.topological_sort(all_vars, var_dependencies)
-        
-        # Third pass: generate declarations
-        for var in ordered_vars:
-            var_type, init_value = var_initializations[var]
-            if init_value:
-                declarations.append(f"    {var_type} {var} = {init_value};")
-            else:
-                # No valid initialization found, use test value
-                declarations.append(f"    {var_type} {var} = 1;")
-        
-        return declarations
-    
-    def topological_sort(self, variables, dependencies):
-        """Topologically sort variables based on their dependencies"""
-        # Kahn's algorithm for topological sorting
-        in_degree = {var: 0 for var in variables}
-        
-        # Calculate in-degrees - count how many variables depend on each variable
-        for var in variables:
-            for dep in dependencies[var]:
-                if dep in in_degree:
-                    in_degree[var] += 1  # var depends on dep, so var's in-degree increases
-        
-        # Find variables with no dependencies (in-degree 0)
-        queue = [var for var in variables if in_degree[var] == 0]
-        result = []
-        
-        while queue:
-            var = queue.pop(0)
-            result.append(var)
-            
-            # Remove this variable's dependencies and update in-degrees
-            for other_var in variables:
-                if var in dependencies[other_var]:
-                    in_degree[other_var] -= 1
-                    if in_degree[other_var] == 0:
-                        queue.append(other_var)
-        
-        # If we couldn't sort all variables, there might be circular dependencies
-        if len(result) != len(variables):
-            # Add remaining variables in arbitrary order
-            for var in variables:
-                if var not in result:
-                    result.append(var)
-        
-        return result
-    
-    
-    def get_system_prompt(self, func_name, return_expression):
-        """Generate the system prompt for vectorization"""
-        
-        # Determine if function needs specific return value
-        needs_return = return_expression is not None and return_expression != "calc_checksum(__func__)"
-        
-        if needs_return:
-            return_info = f"""
-IMPORTANT: The original function returns: {return_expression}
-Your vectorized function MUST:
-- Be named `real_t {func_name}_vectorized(struct args_t * func_args)`
-- Include initialise_arrays and gettimeofday calls like the original
-- Compute and return the exact same value: {return_expression}
-- Ensure all variables used in the return expression are properly computed"""
-        else:
-            return_info = f"""
-The vectorized function should:
-- Be named `real_t {func_name}_vectorized(struct args_t * func_args)`
-- Include initialise_arrays and gettimeofday calls like the original
-- Return calc_checksum(__func__)"""
+        # Analyze the function to extract key information dynamically
+        func_analysis = self.analyze_function(full_function_code)
         
         return f"""You are an expert in SIMD vectorization using AVX2 intrinsics.
 
-Generate a complete C function named `{func_name}_vectorized` that vectorizes the given original function using AVX2 intrinsics. The function should:
-- Have the exact same signature as the original: real_t {func_name}_vectorized(struct args_t * func_args)
-- Include the same initialization pattern: initialise_arrays(__func__) at the beginning
-- Use gettimeofday(&func_args->t1, NULL) BEFORE the computation loops (NOT local struct timeval variables)
-- Use gettimeofday(&func_args->t2, NULL) AFTER the computation loops (NOT local struct timeval variables)
-- DO NOT declare struct timeval variables - use func_args->t1 and func_args->t2 directly
-- Use the existing global arrays (a, b, c, d, e for 1D arrays and aa, bb, cc for 2D arrays) - DO NOT declare new arrays
-- Include any necessary headers like #include <immintrin.h>
-- Use AVX2 intrinsics (_mm256_ps functions) for 8-element float vectors (NOT _mm256_pd which is for double)
-- Ensure the final state of all arrays, variables, and return value match the original function
-- Call dummy() function the same number of times with the same arguments as the original
-- You may freely optimize, reorder, restructure, or eliminate redundant operations as long as the final results are identical
+Given the following original TSVC function:
 
-{return_info}
+```c
+{full_function_code}
+```
 
-IMPORTANT TYPE AND DECLARATION CONSTRAINTS:
-- Arrays are declared as 'real_t' type (NOT double), where real_t is typedef'd as float
-- DO NOT declare extern variables for: LEN_1D, LEN_2D, iterations (these are macros)
-- 1D arrays: a, b, c, d, e are declared as 'real_t a[LEN_1D]' etc.
-- 2D arrays: aa, bb, cc are declared as 'real_t aa[LEN_2D][LEN_2D]' etc.
-- dummy() function signature: int dummy(real_t*, real_t*, real_t*, real_t*, real_t*, real_t(*)[LEN_2D], real_t(*)[LEN_2D], real_t(*)[LEN_2D], real_t)
-- If you need to reference these arrays, do NOT use extern declarations - they are already global"""
+Generate a vectorized version named `{func_name}_vectorized` that:
+
+1. **Preserves the exact same behavior** as the original function
+2. **Uses AVX2 intrinsics** (_mm256_* functions) for vectorization
+3. **Returns the same value**: {return_expression}
+4. **Maintains the same function signature**: real_t {func_name}_vectorized(struct args_t * func_args)
+
+Key requirements based on the original function:
+- Arrays used: {', '.join(func_analysis['arrays_used'])}
+- Timing: Use gettimeofday with func_args->t1 and func_args->t2 (already declared in func_args)
+- Include necessary headers like #include <immintrin.h> for AVX2
+- Call dummy() the same number of times as the original (typically inside the 'nl' loop)
+- Arrays are already declared globally - do NOT redeclare them
+
+Vectorization approach:
+1. Analyze data dependencies in the loops
+2. Use 8-wide float vectors (_mm256_ps for real_t which is float)
+3. Handle loop remainders properly
+4. Ensure memory alignment when possible
+5. Preserve the exact computation order where it affects results
+
+When doing vectorization analysis, follow these steps:
+1. Simplify the case by setting the loop iterations to a small number and enumerate the process as the code written.
+2. When enumerating, recognize and remove overwritten assignments and calculations that cancel each other out to make the dependencies clear.
+3. For the rest of operations, identify which element is referred as its original value and which one is referred as its updated value.
+   CRITICAL: If a[i] depends on a[j] and a[j] might update during the loop, you must split the vectorization into phases:
+   - Phase 1: Process elements that use original values
+   - Phase 2: Process elements that use updated values
+4. Load original values(not updated if executing sequentially like a[i+1]) directly from memory first, then compute elements that use original values, then store these elements.
+   After that, load the updated values from memory, then compute elements that use updated values, finally store these elements.
+5. Make necessary unrolling, loop distribution, loop interchanging, statement reordering based on step 3 & 4. Feel free to optimize and restructure as needed.
+6. Understand the pattern, then generate the actual vectorized code for the full loop range, ensuring final results match the original."""
     
     def vectorizer_agent(self, func_name, feedback=None):
         """Generate vectorized code using Anthropic API"""
         
-        # Get return expression for this function
-        return_expression = self.test_functions[func_name].get('return_expression', None)
+        # Get the full function code
+        full_function_code = self.test_functions[func_name]['code']
         
-        # Create generic prompts without function-specific logic
+        # Create prompts based on whether this is initial attempt or repair
         if feedback is None:
-            # Initial attempt - send the whole function instead of just the loop
-            full_function_code = self.test_functions[func_name]['code']
-            user_message = f"""
-```c
-{full_function_code}
-```
-"""
+            # Initial attempt - system prompt contains the function
+            system_prompt = self.get_system_prompt(func_name, full_function_code)
+            user_message = "Generate the vectorized version of the function."
         else:
-            # Repair attempt - include all relevant error information
+            # Repair attempt - include error feedback
+            system_prompt = self.get_system_prompt(func_name, full_function_code)
+            
             if feedback['error_type'] == 'compilation':
-                user_message = f"""
+                user_message = f"""The previous attempt had compilation errors:
+
 {feedback['error_message']}
-"""
+
+Please fix these errors and generate a corrected vectorized function."""
             elif feedback['error_type'] == 'correctness':
-                user_message = f"""
+                user_message = f"""The previous attempt produced incorrect results:
+
 {feedback['test_output']}
-"""
+
+Please analyze the issue and generate a corrected vectorized function that produces the same results as the original."""
             elif feedback['error_type'] == 'not_vectorized':
-                user_message = f"""Previous attempt failed to understand that the code can be vectorized.
+                user_message = f"""The previous attempt did not actually use vector intrinsics. You must use AVX2 intrinsics (_mm256_* functions) to vectorize the loops.
 
-Here's what you tried before:
-{feedback['previous_code']}
-"""
+Previous incorrect attempt:
+{feedback.get('previous_code', '')}
+
+Generate a properly vectorized version using AVX2 intrinsics."""
             else:
-                # Generic fallback
-                user_message = f"""The previous vectorized function had this error:
+                user_message = f"""The previous attempt had an error:
 {feedback.get('error_message', 'Unknown error')}
-{feedback.get('test_output', '')}
-{feedback.get('hint', '')}
 
-Generate a corrected `{func_name}_vectorized` function that:
-- Fixes the error
-- Has the correct signature: real_t {func_name}_vectorized(struct args_t * func_args)
-- Correctly vectorizes the given function
-
-Output only the C function, no explanations."""
-        
-        system_prompt = self.get_system_prompt(func_name, return_expression)
+Please fix the issue and generate a corrected vectorized function."""
         
         try:
             message = self.client.messages.create(
@@ -764,37 +404,6 @@ real_t test(real_t* A){
         else:
             return ""
     
-    
-    def _detect_modified_arrays(self, func_name):
-        """Detect which arrays are modified by analyzing the core loop"""
-        if not func_name or func_name not in self.test_functions:
-            return ['a']  # Default fallback
-        
-        core_loop = self.test_functions[func_name]['core_loop']
-        modified_arrays = []
-        
-        # Look for assignment patterns: array[index] = ...
-        import re
-        assignment_patterns = [
-            r'\b([a-e])\s*\[\s*[^\]]+\]\s*=',  # Single letter arrays: a[i] = ...
-            r'\b(aa|bb|cc)\s*\[\s*[^\]]+\]\s*\[\s*[^\]]+\]\s*=',  # 2D arrays: aa[i][j] = ...
-        ]
-        
-        for pattern in assignment_patterns:
-            matches = re.findall(pattern, core_loop)
-            for match in matches:
-                if match not in modified_arrays:
-                    modified_arrays.append(match)
-        
-        # If no arrays detected as modified, default to 'a'
-        if not modified_arrays:
-            modified_arrays = ['a']
-        
-        return modified_arrays
-    
-    # Removed old test harness creation methods - now using tsvc.c infrastructure
-    
-    # Removed old test harness creation methods - now using tsvc.c infrastructure
     
     def extract_and_clean_function(self, vectorized_code):
         """Extract and clean the function from LLM response"""
@@ -1090,25 +699,14 @@ real_t test(real_t* A){
         
         # Functions that require int * arg_info  
         int_functions = {
-            's162': 1,      # k = 1
-            's171': 1,      # inc = 1  
-            's174': 10,     # M = 10
-            's175': 1,      # inc = 1
             's318': 1,      # inc = 1
-        }
-        
-        # Functions that require struct{int a; int b;} * arg_info
-        int_struct_functions = {
-            's122': {'a': 1, 'b': 2},    # n1 = 1, n3 = 2
-            's172': {'a': 1, 'b': 1},    # n1 = 1, n3 = 1  
+            's332': 1,      # t = 1
         }
         
         if func_name in real_t_struct_functions:
             return real_t_struct_functions[func_name]
         elif func_name in int_functions:
             return int_functions[func_name]
-        elif func_name in int_struct_functions:
-            return int_struct_functions[func_name]
         else:
             return None
 
@@ -1126,19 +724,12 @@ real_t test(real_t* A){
     func_args_orig.arg_info = &s242_args;
     func_args_vec.arg_info = &s242_args;"""
         
-        elif func_name in ['s162', 's171', 's174', 's175', 's318']:
+        elif func_name in ['s318', 's332']:
             # int * arg_info
             return f"""// Set up arguments for {func_name}: int
     static int {func_name}_arg = {args};
     func_args_orig.arg_info = &{func_name}_arg;
     func_args_vec.arg_info = &{func_name}_arg;"""
-        
-        elif func_name in ['s122', 's172']:
-            # struct{int a; int b;} * arg_info  
-            return f"""// Set up arguments for {func_name}: struct{{int a; int b;}}
-    static struct{{int a; int b;}} {func_name}_args = {{{args['a']}, {args['b']}}};
-    func_args_orig.arg_info = &{func_name}_args;
-    func_args_vec.arg_info = &{func_name}_args;"""
         
         else:
             return "// No special arguments needed - use standard TSVC pattern\n    func_args_orig.arg_info = NULL;\n    func_args_vec.arg_info = NULL;"
@@ -1176,10 +767,6 @@ real_t test(real_t* A){
             else:
                 return f"Test failed with output:\n{error_output[:200]}"
 
-    def analyze_error(self, error_output, func_name):
-        """Legacy method - redirect to analyze_tsvc_error"""
-        return self.analyze_tsvc_error(error_output, func_name)
-    
     def save_iteration_data(self, func_name, iteration, vectorized_code, feedback):
         """Save all data from this iteration for debugging"""
         # Calculate workspace root consistently
@@ -1193,43 +780,37 @@ real_t test(real_t* A){
             f.write(vectorized_code)
         
         # Build the complete prompt that was sent to LLM
-        
-        return_expression = self.test_functions[func_name].get('return_expression', None)
-        system_prompt = self.get_system_prompt(func_name, return_expression)
+        full_function_code = self.test_functions[func_name]['code']
+        system_prompt = self.get_system_prompt(func_name, full_function_code)
         
         if feedback is None:
-            # Use the full function code instead of just the loop
-            full_function = self.test_functions[func_name]['code']
-            user_prompt = f"""
-
-```c
-{full_function}
-```
-
-"""
+            user_prompt = "Generate the vectorized version of the function."
         else:
-            # Repair attempt - include all relevant error information
+            # Repair attempt prompts
             if feedback['error_type'] == 'compilation':
-                user_prompt = f"""
-{feedback['error_message']}
-"""
-            elif feedback['error_type'] == 'correctness':
-                user_prompt = f"""
-{feedback['test_output']}
-"""
-            elif feedback['error_type'] == 'not_vectorized':
-                user_prompt = f"""Previous attempt failed to understand that the code can be vectorized.
+                user_prompt = f"""The previous attempt had compilation errors:
 
-Here's what you tried before:
-{feedback.get('previous_code', 'Code not available')}
-"""
+{feedback['error_message']}
+
+Please fix these errors and generate a corrected vectorized function."""
+            elif feedback['error_type'] == 'correctness':
+                user_prompt = f"""The previous attempt produced incorrect results:
+
+{feedback['test_output']}
+
+Please analyze the issue and generate a corrected vectorized function that produces the same results as the original."""
+            elif feedback['error_type'] == 'not_vectorized':
+                user_prompt = f"""The previous attempt did not actually use vector intrinsics. You must use AVX2 intrinsics (_mm256_* functions) to vectorize the loops.
+
+Previous incorrect attempt:
+{feedback.get('previous_code', '')}
+
+Generate a properly vectorized version using AVX2 intrinsics."""
             else:
-                # Generic fallback
-                user_prompt = f"""The previous vectorized function had this error:
+                user_prompt = f"""The previous attempt had an error:
 {feedback.get('error_message', 'Unknown error')}
-{feedback.get('test_output', '')}
-{feedback.get('hint', '')}
-"""
+
+Please fix the issue and generate a corrected vectorized function."""
         
         # Save the complete prompt
         with open(os.path.join(attempts_dir, f"prompt_{iteration}.txt"), 'w') as f:
@@ -1237,7 +818,7 @@ Here's what you tried before:
             f.write(f"SYSTEM PROMPT:\n{'-'*50}\n{system_prompt}\n\n")
             f.write(f"USER PROMPT:\n{'-'*50}\n{user_prompt}\n")
     
-    def run_vectorization_fsm(self, func_name, func_data):
+    def run_vectorization_fsm(self, func_name):
         """Main FSM orchestration for a single function"""
         print(f"\n{'='*60}")
         print(f"Vectorizing {func_name}")
@@ -1322,8 +903,7 @@ Here's what you tried before:
             if func_name not in self.test_functions:
                 continue
                 
-            func_data = self.test_functions[func_name]
-            result = self.run_vectorization_fsm(func_name, func_data)
+            result = self.run_vectorization_fsm(func_name)
             results.append(result)
             
             # Save results in workspace root
