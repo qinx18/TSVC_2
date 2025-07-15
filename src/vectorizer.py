@@ -89,12 +89,16 @@ class TSVCVectorizerExperiment:
                 full_function = f"real_t {func_name}(struct args_t * func_args)\n{{\n{func_match.group(1)}\n}}"
                 func_body = func_match.group(1)
                 
-                # Extract the return statement from the original function
-                return_match = re.search(r'return\s+([^;]+);', func_body)
+                # Remove comments from the function code before processing
+                full_function_cleaned = self.remove_comments_from_code(full_function)
+                func_body_cleaned = self.remove_comments_from_code(func_body)
+                
+                # Extract the return statement from the cleaned function body
+                return_match = re.search(r'return\s+([^;]+);', func_body_cleaned)
                 return_expression = return_match.group(1) if return_match else None
                 
                 functions[func_name] = {
-                    'code': full_function,
+                    'code': full_function_cleaned,
                     'return_expression': return_expression
                 }
                 
@@ -103,6 +107,26 @@ class TSVCVectorizerExperiment:
                 pass  # Function not found
         
         return functions
+    
+    def remove_comments_from_code(self, code):
+        """Remove C-style comments from function code"""
+        # Remove single-line comments (//)
+        code = re.sub(r'//.*?$', '', code, flags=re.MULTILINE)
+        
+        # Remove multi-line comments (/* */)
+        code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
+        
+        # Clean up multiple consecutive empty lines
+        code = re.sub(r'\n\s*\n\s*\n', '\n\n', code)
+        
+        # Clean up leading/trailing whitespace on lines
+        lines = code.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            cleaned_line = line.rstrip()
+            cleaned_lines.append(cleaned_line)
+        
+        return '\n'.join(cleaned_lines)
     
     def analyze_function(self, function_code):
         """Analyze the function to extract key information"""

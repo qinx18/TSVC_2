@@ -4,6 +4,20 @@
 
 This analysis compares two TSVC vectorization experiments to evaluate the impact of prompt engineering (PE) on automatic vectorization using Claude-4 Sonnet. The comparison reveals significant improvements in success rates, performance, and error recovery.
 
+### Baseline Experiment Results (50 TSVC functions)
+
+- **Success Rate**: 88% (44/50 functions successfully vectorized)
+- **Good Performance**: 44.2% (19/43 functions achieved >1.5x speedup)
+- **Poor Performance**: 55.8% (24/43 functions achieved ≤1.5x speedup)
+- **Complete Failures**: 12% (6/50 functions failed to vectorize)
+
+### PE-Enhanced Experiment Results (50 TSVC functions)
+
+- **Success Rate**: 90% (45/50 functions successfully vectorized)
+- **Good Performance**: 52% (26/50 functions achieved >1.5x speedup)
+- **Poor Performance**: 38% (19/50 functions achieved ≤1.5x speedup)
+- **Complete Failures**: 10% (5/50 functions failed to vectorize)
+
 ### Key Results
 
 | Metric | Baseline | PE-Enhanced | Improvement |
