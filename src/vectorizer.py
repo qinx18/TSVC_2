@@ -175,6 +175,12 @@ Generate a vectorized version named `$func_name_vectorized` that:
 4. **Maintains the same function signature**: real_t $func_name_vectorized(struct args_t * func_args)
 5. **Outperforms compiler auto-vectorization** - focus on patterns the compiler struggles with
 
+**CRITICAL: Data Type and Intrinsics**
+- `real_t` is defined as `float` (single precision), NOT double
+- Always use `_ps` intrinsics for single precision: `_mm256_load_ps`, `_mm256_add_ps`, `_mm256_mul_ps`, `_mm256_store_ps`, etc.
+- Never use `_pd` intrinsics (those are for double precision)
+- `__m256` holds 8 float values, so process 8 elements per vector operation
+
 Key requirements based on the original function:
 - Arrays used: {', '.join(func_analysis['arrays_used'])}
 - Timing: Use gettimeofday with func_args->t1 and func_args->t2 (already declared in func_args)
@@ -290,7 +296,7 @@ Please fix the issue and generate a corrected vectorized function."""
             return False, "Function appears to be a copy of the original without actual vectorization. The LLM may have misunderstood the task."
         
         # Only if no intrinsics found, then it's not vectorized
-        return False, "No vector intrinsics found. The code needs to use AVX2 intrinsics like _mm256_load_ps, _mm256_add_ps, etc."
+        return False, "No vector intrinsics found. The code needs to use AVX2 intrinsics like _mm256_load_ps, _mm256_add_ps, etc. Remember: real_t is float, so use _ps intrinsics, not _pd."
     
     def create_modified_tsvc(self, func_name, vectorized_func):
         """Create a minimal test harness that leverages existing TSVC infrastructure"""
@@ -711,7 +717,7 @@ real_t test(real_t* A){
                 'error_type': 'timeout',
                 'error_message': 'Execution timeout',
                 'test_output': None,
-                'hint': 'Possible infinite loop in vectorized code',
+                'hint': 'Possible infinite loop in vectorized code. Common cause: Using _pd intrinsics instead of _ps. Remember: real_t is float, use _mm256_*_ps intrinsics.',
                 'performance_data': None
             }
         except Exception as e:

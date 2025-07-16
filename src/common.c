@@ -220,7 +220,7 @@ int initialise_arrays(const char* name)
         set_1d_array(b, LEN_1D, any,frac2);
     } else if (!strcmp(name, "s1113")) {
         set_1d_array(a, LEN_1D, one,unit);
-        set_1d_array(b, LEN_1D, any,frac2);
+        set_1d_array(b, LEN_1D, one,unit);
     } else if (!strcmp(name, "s114")) {
         set_2d_array(aa, any,frac);
         set_2d_array(bb, any,frac2);
@@ -303,9 +303,9 @@ int initialise_arrays(const char* name)
         set_1d_array(e, LEN_1D, any,frac);
     } else if (!strcmp(name, "s1161")) {
         set_1d_array(a, LEN_1D, one,unit);
-        set_1d_array( &b[0], LEN_1D/2, one,2);
-        set_1d_array( &b[1], LEN_1D/2,-one,2);
-        set_1d_array(c, LEN_1D, one,unit);
+        set_1d_array(b, LEN_1D, one,unit);
+        set_1d_array( &c[0], LEN_1D/2, one,2);
+        set_1d_array( &c[1], LEN_1D/2,-one,2);
         set_1d_array(d, LEN_1D, any,frac);
         set_1d_array(e, LEN_1D, any,frac);
     } else if (!strcmp(name, "s162")) {
