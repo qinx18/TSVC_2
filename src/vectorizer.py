@@ -165,21 +165,15 @@ Given the following original TSVC function:
 {full_function_code}
 ```
 
-**CHALLENGE**: Your vectorized version must OUTPERFORM the compiler's auto-vectorization. The baseline is compiled with GCC -O3 -ftree-vectorize, so the compiler will attempt its own vectorization. Your manual vectorization must be better than what the compiler produces.
-
 Generate a vectorized version named `$func_name_vectorized` that:
 
 1. **Preserves the exact same behavior** as the original function
 2. **Uses AVX2 intrinsics** (_mm256_* functions) for vectorization
 3. **Returns the same value**: {return_expression}
 4. **Maintains the same function signature**: real_t $func_name_vectorized(struct args_t * func_args)
-5. **Outperforms compiler auto-vectorization** - focus on patterns the compiler struggles with
 
 **CRITICAL: Data Type and Intrinsics**
 - `real_t` is defined as `float` (single precision), NOT double
-- Always use `_ps` intrinsics for single precision: `_mm256_load_ps`, `_mm256_add_ps`, `_mm256_mul_ps`, `_mm256_store_ps`, etc.
-- Never use `_pd` intrinsics (those are for double precision)
-- `__m256` holds 8 float values, so process 8 elements per vector operation
 
 Key requirements based on the original function:
 - Arrays used: {', '.join(func_analysis['arrays_used'])}
@@ -254,25 +248,42 @@ Generate a corrected vectorized function that cannot be optimized away by the co
 
 Please fix the issue and generate a corrected vectorized function."""
         
-        try:
-            message = self.client.messages.create(
-                model=self.model,
-                max_tokens=4000,
-                temperature=self.temperature,
-                system=system_prompt,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": user_message
-                    }
-                ]
-            )
-            
-            return message.content[0].text
-            
-        except Exception as e:
-            print(f"API error: {e}")
-            return None
+        max_retries = 3
+        base_delay = 1.0
+        
+        for attempt in range(max_retries):
+            try:
+                message = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=4000,
+                    temperature=self.temperature,
+                    system=system_prompt,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": user_message
+                        }
+                    ]
+                )
+                
+                return message.content[0].text
+                
+            except Exception as e:
+                error_str = str(e)
+                print(f"API error (attempt {attempt + 1}/{max_retries}): {e}")
+                
+                # Check if it's a rate limit/overload error
+                if "529" in error_str or "overloaded" in error_str.lower() or "rate" in error_str.lower():
+                    if attempt < max_retries - 1:  # Don't wait on the last attempt
+                        delay = base_delay * (2 ** attempt)  # Exponential backoff
+                        print(f"API overloaded, retrying in {delay} seconds...")
+                        time.sleep(delay)
+                        continue
+                
+                # For other errors or final attempt, return None
+                return None
+        
+        return None
     
     def check_if_vectorized(self, code):
         """Check if the code actually contains vectorization"""
@@ -472,14 +483,19 @@ real_t test(real_t* A){
         code_blocks = re.findall(r'```c?\n(.*?)\n```', vectorized_code, re.DOTALL)
         
         if code_blocks:
-            # Look for the block that contains the actual vectorized function
-            for block in reversed(code_blocks):  # Check from last to first
-                # Check if this block contains vector intrinsics or the function signature
-                if '_vectorized' in block or '_mm256_' in block or '__m256' in block:
+            # The LLM typically provides the complete function last
+            # Look for the last block that contains a complete function
+            vectorized_func = None
+            
+            # Go through blocks from last to first
+            for block in reversed(code_blocks):
+                # Check if this block contains a complete function signature
+                if re.search(r'real_t\s+\w+_vectorized\s*\(.*?\{.*?\}', block, re.DOTALL):
                     vectorized_func = block
                     break
-            else:
-                # If no vectorized function found, take the last code block
+            
+            # If no complete function found, take the last block
+            if vectorized_func is None:
                 vectorized_func = code_blocks[-1]
         else:
             # No code blocks found, try to extract function directly
@@ -531,6 +547,125 @@ real_t test(real_t* A){
         
         return vectorized_func
     
+    def find_function_boundaries(self, modified_tsvc_path, func_name):
+        """Find the exact line numbers where original and vectorized functions start"""
+        try:
+            with open(modified_tsvc_path, 'r') as f:
+                lines = f.readlines()
+            
+            original_start = None
+            vectorized_start = None
+            
+            for i, line in enumerate(lines, 1):  # 1-based line numbers
+                # Look for original function
+                if f'real_t {func_name}(' in line and f'{func_name}_vectorized' not in line:
+                    original_start = i
+                # Look for vectorized function
+                elif f'real_t {func_name}_vectorized(' in line:
+                    vectorized_start = i
+                    
+            return original_start, vectorized_start
+            
+        except Exception as e:
+            # Fallback to rough estimates if file parsing fails
+            return 30, 60
+
+    def parse_vectorization_info(self, stderr_output, func_name, modified_tsvc_path):
+        """Parse compiler vectorization information from stderr output
+        
+        GCC vectorization output format:
+        - filename:line:col: optimized: loop vectorized using N byte vectors
+        - filename:line:col: missed: couldn't vectorize loop
+        - filename:line:col: missed: not vectorized: reason
+        
+        We use exact function boundaries to distinguish original vs vectorized function feedback.
+        """
+        vectorization_info = {
+            'original_vectorized': False,
+            'vectorized_vectorized': False,
+            'original_missed_reasons': [],
+            'vectorized_missed_reasons': [],
+            'original_optimized': [],
+            'vectorized_optimized': [],
+            'total_optimized': [],
+            'total_missed': []
+        }
+        
+        if not stderr_output:
+            return vectorization_info
+            
+        # Find exact function boundaries
+        original_start, vectorized_start = self.find_function_boundaries(modified_tsvc_path, func_name)
+        
+        lines = stderr_output.split('\n')
+        
+        # Filter only relevant vectorization messages
+        relevant_lines = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Skip irrelevant messages
+            if any(skip in line for skip in [
+                'statement clobbers memory',
+                'not vectorized: no vectype',
+                'basic block part vectorized',  # Not loop vectorization
+                'include/',  # Skip messages from system headers
+                '.h:'  # Skip messages from header files
+            ]):
+                continue
+                
+            # Only keep messages about our modified_tsvc file
+            if 'modified_tsvc' not in line:
+                continue
+                
+            # Keep only loop vectorization messages
+            if ('optimized:' in line and 'loop vectorized' in line) or \
+               ('missed:' in line and ('vectorize' in line or 'not vectorized:' in line)):
+                relevant_lines.append(line)
+        
+        # Now parse the filtered lines using exact function boundaries
+        for line in relevant_lines:
+            try:
+                # Extract line number from compiler output
+                parts = line.split(':')
+                if len(parts) >= 2:
+                    line_num = int(parts[1])
+                    
+                    # Determine which function based on exact boundaries
+                    is_original = original_start and line_num >= original_start and (not vectorized_start or line_num < vectorized_start)
+                    is_vectorized = vectorized_start and line_num >= vectorized_start
+                    
+                    if 'optimized:' in line and 'loop vectorized' in line:
+                        vectorization_info['total_optimized'].append(line)
+                        
+                        if is_original:
+                            vectorization_info['original_vectorized'] = True
+                            vectorization_info['original_optimized'].append(line)
+                        elif is_vectorized:
+                            vectorization_info['vectorized_vectorized'] = True
+                            vectorization_info['vectorized_optimized'].append(line)
+                            
+                    elif 'missed:' in line:
+                        # Keep all missed reasons for better debugging
+                        vectorization_info['total_missed'].append(line)
+                        
+                        if is_original:
+                            # Only deduplicate exact same messages to preserve different reasons for same line
+                            if line not in vectorization_info['original_missed_reasons']:
+                                vectorization_info['original_missed_reasons'].append(line)
+                        elif is_vectorized:
+                            # Only deduplicate exact same messages to preserve different reasons for same line
+                            if line not in vectorization_info['vectorized_missed_reasons']:
+                                vectorization_info['vectorized_missed_reasons'].append(line)
+                                
+            except (ValueError, IndexError):
+                # If we can't parse line numbers, skip this line
+                pass
+                
+        return vectorization_info
+    
     def compiler_tester_agent(self, func_name, vectorized_code, iteration=1):
         """Test the vectorized code using the modified tsvc.c framework"""
         
@@ -557,7 +692,8 @@ real_t test(real_t* A){
                 'error_message': vec_message,
                 'test_output': None,
                 'hint': 'The code must use AVX2 intrinsics (_mm256_* functions) to vectorize the loop. Review the vectorization steps in the system prompt.',
-                'performance_data': None
+                'performance_data': None,
+                'vectorization_info': None  # No compilation happened yet
             }
         
         # Create modified tsvc.c with both original and vectorized versions
@@ -570,7 +706,8 @@ real_t test(real_t* A){
                 'error_message': f'Failed to create modified tsvc.c: {str(e)}',
                 'test_output': None,
                 'hint': 'Check if tsvc.c and common.c files are accessible',
-                'performance_data': None
+                'performance_data': None,
+                'vectorization_info': None  # No compilation happened yet
             }
         
         # Save the modified tsvc.c
@@ -590,6 +727,9 @@ real_t test(real_t* A){
         # Compile with full optimization including auto-vectorization
         # Key: Test if LLM can do better than compiler's auto-vectorization
         # This creates a realistic baseline where compiler does its best vectorization
+        # 
+        # Enhanced with vectorization analysis to determine if compiler vectorized the code
+        # Using more specific flags to reduce noise in output
         compile_result = subprocess.run([
             'gcc',
             '-std=c99',
@@ -599,6 +739,8 @@ real_t test(real_t* A){
             '-ftree-vectorize',     # Enable auto-vectorization - LLM must beat compiler
             '-mavx2',               # Enable AVX2 for intrinsics
             '-mfma',                # Enable FMA for intrinsics
+            '-fopt-info-vec-optimized',  # Report successful vectorizations
+            '-fopt-info-vec-missed',     # Report missed vectorization opportunities
             '-I', src_dir,          # Use src directory for headers
             '-o', exe_file,
             modified_tsvc_path,
@@ -607,6 +749,114 @@ real_t test(real_t* A){
             '-lm'
         ], capture_output=True, text=True, cwd=src_dir)
         
+        # Parse vectorization information from compiler output
+        vectorization_info = self.parse_vectorization_info(compile_result.stderr, func_name, modified_tsvc_path)
+        
+        # Save compiler output for analysis
+        with open(os.path.join(attempts_dir, f"compiler_output_{iteration}.txt"), 'w') as f:
+            # Show function boundaries for debugging
+            original_start, vectorized_start = self.find_function_boundaries(modified_tsvc_path, func_name)
+            f.write("=== VECTORIZATION ANALYSIS ===\n")
+            f.write(f"Original function starts at line: {original_start}\n")
+            f.write(f"Vectorized function starts at line: {vectorized_start}\n")
+            f.write(f"Original function vectorized by compiler: {vectorization_info['original_vectorized']}\n")
+            f.write(f"Vectorized function vectorized by compiler: {vectorization_info['vectorized_vectorized']}\n\n")
+            
+            f.write("--- ORIGINAL FUNCTION ---\n")
+            if vectorization_info['original_optimized']:
+                f.write("✅ Compiler successfully vectorized:\n")
+                for opt in vectorization_info['original_optimized']:
+                    # Extract just the relevant part
+                    if ':' in opt:
+                        parts = opt.split(':', 4)
+                        if len(parts) >= 5:
+                            f.write(f"  Line {parts[1]}: {parts[4]}\n")
+                        else:
+                            f.write(f"  {opt}\n")
+            else:
+                f.write("❌ Compiler did NOT vectorize\n")
+                
+            if vectorization_info['original_missed_reasons']:
+                f.write("Missed opportunities:\n")
+                # Group by line number to show all reasons for each line
+                line_reasons = {}
+                for missed in vectorization_info['original_missed_reasons']:
+                    if ':' in missed:
+                        parts = missed.split(':', 4)
+                        if len(parts) >= 5:
+                            line_num = parts[1]
+                            reason = parts[4].strip()
+                            if line_num not in line_reasons:
+                                line_reasons[line_num] = []
+                            if reason not in line_reasons[line_num]:
+                                line_reasons[line_num].append(reason)
+                
+                # Output grouped by line number
+                for line_num in sorted(line_reasons.keys(), key=int):
+                    reasons = line_reasons[line_num]
+                    if len(reasons) == 1:
+                        f.write(f"  Line {line_num}: {reasons[0]}\n")
+                    else:
+                        f.write(f"  Line {line_num}:\n")
+                        for reason in reasons:
+                            f.write(f"    - {reason}\n")
+            
+            f.write("\n--- VECTORIZED FUNCTION ---\n")
+            if vectorization_info['vectorized_optimized']:
+                f.write("✅ Compiler successfully vectorized:\n")
+                for opt in vectorization_info['vectorized_optimized']:
+                    if ':' in opt:
+                        parts = opt.split(':', 4)
+                        if len(parts) >= 5:
+                            f.write(f"  Line {parts[1]}: {parts[4]}\n")
+                        else:
+                            f.write(f"  {opt}\n")
+            else:
+                f.write("❌ Compiler did NOT vectorize\n")
+                
+            if vectorization_info['vectorized_missed_reasons']:
+                f.write("Missed opportunities:\n")
+                # Group by line number to show all reasons for each line
+                line_reasons = {}
+                for missed in vectorization_info['vectorized_missed_reasons']:
+                    if ':' in missed:
+                        parts = missed.split(':', 4)
+                        if len(parts) >= 5:
+                            line_num = parts[1]
+                            reason = parts[4].strip()
+                            if line_num not in line_reasons:
+                                line_reasons[line_num] = []
+                            if reason not in line_reasons[line_num]:
+                                line_reasons[line_num].append(reason)
+                
+                # Output grouped by line number
+                for line_num in sorted(line_reasons.keys(), key=int):
+                    reasons = line_reasons[line_num]
+                    if len(reasons) == 1:
+                        f.write(f"  Line {line_num}: {reasons[0]}\n")
+                    else:
+                        f.write(f"  Line {line_num}:\n")
+                        for reason in reasons:
+                            f.write(f"    - {reason}\n")
+            
+            f.write("\n--- INTERPRETATION ---\n")
+            if vectorization_info['original_vectorized'] and not vectorization_info['vectorized_vectorized']:
+                f.write("⚠️  WARNING: Compiler vectorized original but NOT the LLM version!\n")
+                f.write("   This suggests the LLM vectorization may have broken auto-vectorizability.\n")
+            elif not vectorization_info['original_vectorized'] and vectorization_info['vectorized_vectorized']:
+                f.write("✅ GOOD: LLM enabled vectorization where compiler couldn't!\n")
+                f.write("   The manual intrinsics helped the compiler.\n")
+            elif vectorization_info['original_vectorized'] and vectorization_info['vectorized_vectorized']:
+                f.write("ℹ️  INFO: Both versions were vectorized by compiler.\n")
+                f.write("   Performance differences come from vectorization strategy, not enablement.\n")
+            else:
+                f.write("❌ NEUTRAL: Neither version was auto-vectorized by compiler.\n")
+                f.write("   The LLM's manual vectorization is the only vectorization present.\n")
+            
+            if compile_result.returncode != 0:
+                f.write("\n\n=== COMPILATION ERRORS ===\n")
+                f.write(compile_result.stderr)
+        
         if compile_result.returncode != 0:
             return {
                 'success': False,
@@ -614,7 +864,8 @@ real_t test(real_t* A){
                 'error_message': compile_result.stderr,
                 'test_output': None,
                 'hint': 'Check syntax, missing headers, or incorrect intrinsic usage',
-                'performance_data': None
+                'performance_data': None,
+                'vectorization_info': vectorization_info
             }
         
         # Run the test
@@ -645,7 +896,8 @@ real_t test(real_t* A){
                     'error_message': 'Both original and vectorized versions executed in 0.000000 seconds, suggesting compiler optimization eliminated the computation',
                     'test_output': run_result.stdout,
                     'hint': 'The compiler likely optimized away the entire computation. Ensure the vectorized function has meaningful work that cannot be eliminated. Check that: 1) The dummy() function is called properly with the computed result, 2) The loop variable and computations are actually used, 3) Consider adding __attribute__((noinline)) or volatile keywords to prevent optimization.',
-                    'performance_data': performance_data
+                    'performance_data': performance_data,
+                    'vectorization_info': vectorization_info
                 }
             
             # Check for suspiciously fast baseline (potential optimization issue)
@@ -656,7 +908,8 @@ real_t test(real_t* A){
                     'error_message': 'Original version executed suspiciously fast, suggesting unintended compiler optimization',
                     'test_output': run_result.stdout,
                     'hint': 'The baseline (original) function is running too fast for the amount of work it should be doing. This suggests the compiler may have optimized it in ways that make comparison unfair. Consider using volatile variables or compiler barriers to ensure the computation actually happens.',
-                    'performance_data': performance_data
+                    'performance_data': performance_data,
+                    'vectorization_info': vectorization_info
                 }
             
             # Check if the test passed based on correctness
@@ -669,7 +922,8 @@ real_t test(real_t* A){
                         'error_message': None,
                         'test_output': run_result.stdout,
                         'performance_data': performance_data,
-                        'speedup_status': 'improved'
+                        'speedup_status': 'improved',
+                        'vectorization_info': vectorization_info
                     }
                 else:
                     return {
@@ -678,7 +932,8 @@ real_t test(real_t* A){
                         'error_message': None,
                         'test_output': run_result.stdout,
                         'performance_data': performance_data,
-                        'speedup_status': 'no_improvement'
+                        'speedup_status': 'no_improvement',
+                        'vectorization_info': vectorization_info
                     }
             elif "CORRECTNESS: FAIL" in run_result.stdout:
                 return {
@@ -687,7 +942,8 @@ real_t test(real_t* A){
                     'error_message': 'Checksum mismatch between original and vectorized versions',
                     'test_output': run_result.stdout,
                     'hint': self.analyze_tsvc_error(run_result.stdout),
-                    'performance_data': performance_data
+                    'performance_data': performance_data,
+                    'vectorization_info': vectorization_info
                 }
             else:
                 # Execution completed but no clear pass/fail indication
@@ -708,7 +964,8 @@ real_t test(real_t* A){
                     'error_message': error_msg,
                     'test_output': run_result.stdout,
                     'hint': 'Check if the vectorized function has the correct signature and return statement',
-                    'performance_data': performance_data
+                    'performance_data': performance_data,
+                    'vectorization_info': vectorization_info
                 }
                 
         except subprocess.TimeoutExpired:
@@ -718,7 +975,8 @@ real_t test(real_t* A){
                 'error_message': 'Execution timeout',
                 'test_output': None,
                 'hint': 'Possible infinite loop in vectorized code. Common cause: Using _pd intrinsics instead of _ps. Remember: real_t is float, use _mm256_*_ps intrinsics.',
-                'performance_data': None
+                'performance_data': None,
+                'vectorization_info': vectorization_info
             }
         except Exception as e:
             return {
@@ -727,7 +985,8 @@ real_t test(real_t* A){
                 'error_message': f'Execution failed: {str(e)}',
                 'test_output': None,
                 'hint': 'Check for runtime errors or missing dependencies',
-                'performance_data': None
+                'performance_data': None,
+                'vectorization_info': vectorization_info
             }
     
     def _is_zero_execution_time(self, output):
@@ -1004,7 +1263,8 @@ Please fix the issue and generate a corrected vectorized function."""
                 'performance_data': test_result.get('performance_data'),
                 'test_output': test_result.get('test_output'),
                 'error_message': test_result.get('error_message'),
-                'hint': test_result.get('hint')
+                'hint': test_result.get('hint'),
+                'vectorization_info': test_result.get('vectorization_info')
             })
             
             if test_result['success']:
