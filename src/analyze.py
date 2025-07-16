@@ -79,11 +79,22 @@ def analyze_performance(results: Dict[str, Any]) -> Dict[str, List[Dict]]:
             
             # Only consider it truly successful if checksum matches (diff is 0)
             if speedup is not None and abs(checksum_diff) < 1e-6:
+                # Get vectorization info from the successful attempt
+                vectorization_info = None
+                for attempt in result['attempts']:
+                    if attempt.get('success', False):
+                        vectorization_info = attempt.get('vectorization_info', {})
+                        break
+                
                 entry = {
                     'function': function_name,
                     'speedup': speedup,
                     'iterations': result['total_iterations'],
-                    'checksum_diff': checksum_diff
+                    'checksum_diff': checksum_diff,
+                    'original_vectorized': vectorization_info.get('original_vectorized', False) if vectorization_info else False,
+                    'vectorized_vectorized': vectorization_info.get('vectorized_vectorized', False) if vectorization_info else False,
+                    'original_missed_reasons': vectorization_info.get('original_missed_reasons', []) if vectorization_info else [],
+                    'vectorized_missed_reasons': vectorization_info.get('vectorized_missed_reasons', []) if vectorization_info else []
                 }
                 
                 if speedup < 1.0:
@@ -135,6 +146,76 @@ def categorize_failure_reasons(failures: Dict[str, List[Dict]]) -> Dict[str, Lis
     
     return categories
 
+def analyze_compiler_vectorization(results: Dict[str, Any]) -> Dict[str, List[str]]:
+    """Analyze compiler vectorization patterns"""
+    
+    vectorization_patterns = {
+        'original_already_vectorized': [],      # Compiler vectorized original, explains low speedup
+        'llm_broke_vectorization': [],          # Original vectorized, but LLM version wasn't
+        'llm_enabled_vectorization': [],        # Original not vectorized, LLM version was
+        'both_not_vectorized': [],             # Neither version vectorized by compiler
+        'both_vectorized': [],                 # Both versions vectorized by compiler
+        'failed_functions': []                 # Functions that failed to vectorize
+    }
+    
+    for result in results['results']:
+        function_name = result['function']
+        success = result['success']
+        
+        if success:
+            # Get vectorization info from the successful attempt
+            vectorization_info = None
+            for attempt in result['attempts']:
+                if attempt.get('success', False):
+                    vectorization_info = attempt.get('vectorization_info', {})
+                    break
+            
+            if vectorization_info:
+                original_vec = vectorization_info.get('original_vectorized', False)
+                vectorized_vec = vectorization_info.get('vectorized_vectorized', False)
+                
+                if original_vec and vectorized_vec:
+                    vectorization_patterns['both_vectorized'].append(function_name)
+                elif original_vec and not vectorized_vec:
+                    vectorization_patterns['llm_broke_vectorization'].append(function_name)
+                elif not original_vec and vectorized_vec:
+                    vectorization_patterns['llm_enabled_vectorization'].append(function_name)
+                else:
+                    vectorization_patterns['both_not_vectorized'].append(function_name)
+                
+                # Special case: if original was vectorized, this might explain poor performance
+                if original_vec:
+                    vectorization_patterns['original_already_vectorized'].append(function_name)
+        else:
+            # For failed functions, try to get vectorization info from any attempt that has it
+            vectorization_info = None
+            for attempt in result['attempts']:
+                if attempt.get('vectorization_info'):
+                    vectorization_info = attempt.get('vectorization_info', {})
+                    break
+            
+            if vectorization_info:
+                original_vec = vectorization_info.get('original_vectorized', False)
+                vectorized_vec = vectorization_info.get('vectorized_vectorized', False)
+                
+                if original_vec and vectorized_vec:
+                    vectorization_patterns['both_vectorized'].append(function_name)
+                elif original_vec and not vectorized_vec:
+                    vectorization_patterns['llm_broke_vectorization'].append(function_name)
+                elif not original_vec and vectorized_vec:
+                    vectorization_patterns['llm_enabled_vectorization'].append(function_name)
+                else:
+                    vectorization_patterns['both_not_vectorized'].append(function_name)
+                
+                # Special case: if original was vectorized, this might explain poor performance
+                if original_vec:
+                    vectorization_patterns['original_already_vectorized'].append(function_name)
+            
+            # Always add failed functions to the failed category
+            vectorization_patterns['failed_functions'].append(function_name)
+    
+    return vectorization_patterns
+
 def analyze_poor_performance_reasons(performance: Dict[str, List[Dict]], 
                                    attempts_dir: str) -> Dict[str, List[str]]:
     """Analyze why certain functions have poor performance"""
@@ -179,6 +260,7 @@ def generate_report(results_file: str, attempts_dir: str) -> str:
     performance = analyze_performance(results)
     failure_categories = categorize_failure_reasons(failures)
     poor_performance_reasons = analyze_poor_performance_reasons(performance, attempts_dir)
+    vectorization_patterns = analyze_compiler_vectorization(results)
     
     report = []
     report.append("# TSVC Vectorizer-PE Experiment Analysis Report\n")
@@ -242,6 +324,44 @@ def generate_report(results_file: str, attempts_dir: str) -> str:
         if functions:
             report.append(f"- **{reason.replace('_', ' ').title()}**: {functions}")
     
+    # Compiler vectorization analysis
+    report.append("\n## Compiler Vectorization Analysis\n")
+    
+    report.append("### Vectorization Patterns:")
+    for pattern, functions in vectorization_patterns.items():
+        if functions:
+            report.append(f"- **{pattern.replace('_', ' ').title()}**: {len(functions)} functions")
+            report.append(f"  - Functions: {', '.join(functions)}")
+    
+    report.append("\n### Performance Impact of Compiler Vectorization:")
+    
+    # Analyze functions where original was already vectorized
+    already_vectorized = set(vectorization_patterns.get('original_already_vectorized', []))
+    low_speedup_already_vectorized = []
+    good_speedup_already_vectorized = []
+    
+    for category, cases in performance.items():
+        for case in cases:
+            if case['function'] in already_vectorized:
+                if case['speedup'] < 1.5:
+                    low_speedup_already_vectorized.append(f"{case['function']} ({case['speedup']:.2f}x)")
+                else:
+                    good_speedup_already_vectorized.append(f"{case['function']} ({case['speedup']:.2f}x)")
+    
+    if low_speedup_already_vectorized:
+        report.append(f"- **Low speedup despite manual vectorization (original already vectorized)**: {', '.join(low_speedup_already_vectorized)}")
+    if good_speedup_already_vectorized:
+        report.append(f"- **Good speedup even with original vectorized**: {', '.join(good_speedup_already_vectorized)}")
+    
+    # Analyze LLM vectorization success
+    llm_enabled = vectorization_patterns.get('llm_enabled_vectorization', [])
+    llm_broke = vectorization_patterns.get('llm_broke_vectorization', [])
+    
+    if llm_enabled:
+        report.append(f"- **LLM enabled compiler vectorization**: {', '.join(llm_enabled)}")
+    if llm_broke:
+        report.append(f"- **LLM broke compiler vectorization**: {', '.join(llm_broke)}")
+    
     # Detailed function analysis
     report.append("\n## Detailed Function Analysis\n")
     
@@ -271,6 +391,14 @@ def generate_report(results_file: str, attempts_dir: str) -> str:
         report.append(f"\n#### {func_name}")
         report.append(f"- Speedup: {speedup:.2f}x")
         report.append(f"- Iterations: {case['iterations']}")
+        report.append(f"- Original function vectorized by compiler: {case['original_vectorized']}")
+        report.append(f"- LLM vectorized function vectorized by compiler: {case['vectorized_vectorized']}")
+        
+        # Show missed vectorization reasons
+        if case['original_missed_reasons']:
+            report.append(f"- Original function missed reasons: {len(case['original_missed_reasons'])} issues")
+        if case['vectorized_missed_reasons']:
+            report.append(f"- Vectorized function missed reasons: {len(case['vectorized_missed_reasons'])} issues")
     
     # Recommendations
     report.append("\n## Recommendations\n")
@@ -287,6 +415,12 @@ def generate_report(results_file: str, attempts_dir: str) -> str:
     report.append("3. **Compiler Optimization**: Leverage compiler auto-vectorization when manual fails")
     report.append("4. **Algorithm Restructuring**: Explore algorithmic changes for better vectorization")
     
+    report.append("\n### Compiler Vectorization Insights:")
+    report.append("1. **Original Already Vectorized**: When compiler already vectorizes the original, manual vectorization may show minimal gains")
+    report.append("2. **LLM Breaking Vectorization**: Some LLM implementations prevent compiler from vectorizing - investigate simpler approaches")
+    report.append("3. **LLM Enabling Vectorization**: LLM can sometimes restructure code to enable compiler vectorization")
+    report.append("4. **Hybrid Approach**: Consider letting compiler vectorize when it can, manual only when compiler fails")
+    
     return '\n'.join(report)
 
 def main():
@@ -298,8 +432,8 @@ def main():
         attempts_dir = sys.argv[1].replace("tsvc_vectorization_results.json", "tsvc_vectorized_attempts")
     else:
         # Default to PE experiment results
-        results_file = "/home/qinxiao/workspace/vectorizer_PE/tsvc_vectorization_results.json"
-        attempts_dir = "/home/qinxiao/workspace/vectorizer_PE/tsvc_vectorized_attempts"
+        results_file = "/home/qinxiao/workspace/PE/tsvc_vectorization_results.json"
+        attempts_dir = "/home/qinxiao/workspace/PE/tsvc_vectorized_attempts"
     
     report = generate_report(results_file, attempts_dir)
     print(report)

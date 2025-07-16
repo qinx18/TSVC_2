@@ -1238,14 +1238,28 @@ Please fix the issue and generate a corrected vectorized function."""
         feedback = None
         
         for iteration in range(1, self.max_iterations + 1):
-            # Generate/repair code
-            vectorized_code = self.vectorizer_agent(
-                func_name, 
-                feedback
-            )
+            # Generate/repair code with retry logic for this iteration
+            vectorized_code = None
+            max_iteration_retries = 2  # Retry at iteration level
+            
+            for iteration_retry in range(max_iteration_retries):
+                vectorized_code = self.vectorizer_agent(
+                    func_name, 
+                    feedback
+                )
+                
+                if vectorized_code is not None:
+                    break  # Success, continue with this iteration
+                
+                # API error occurred
+                if iteration_retry < max_iteration_retries - 1:
+                    print(f"  API error on iteration {iteration}, retrying iteration-level attempt {iteration_retry + 2}/{max_iteration_retries}")
+                    time.sleep(2)  # Additional delay between iteration retries
+                else:
+                    print(f"  API error on iteration {iteration}, all iteration-level retries exhausted")
             
             if vectorized_code is None:
-                print("  API error, stopping")
+                print("  API error, stopping vectorization process")
                 break
             
             # Save iteration data
