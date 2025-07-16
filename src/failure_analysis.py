@@ -20,7 +20,8 @@ def analyze_failures(results: Dict[str, Any]) -> Dict[str, List[Dict]]:
         'correctness': [],
         'compilation': [],
         'timeout': [],
-        'not_vectorized': []
+        'not_vectorized': [],
+        'complete_failure': []  # Functions that failed all attempts
     }
     
     for result in results['results']:
@@ -28,6 +29,19 @@ def analyze_failures(results: Dict[str, Any]) -> Dict[str, List[Dict]]:
         success = result['success']
         
         if not success:
+            # Check if all attempts failed
+            all_failed = True
+            for attempt in result['attempts']:
+                if attempt.get('success', False):
+                    all_failed = False
+                    break
+            
+            if all_failed:
+                failures['complete_failure'].append({
+                    'function': function_name,
+                    'total_iterations': result['total_iterations']
+                })
+            
             for attempt in result['attempts']:
                 error_type = attempt.get('error_type', '')
                 error_message = attempt.get('error_message', '')
@@ -46,7 +60,8 @@ def analyze_performance(results: Dict[str, Any]) -> Dict[str, List[Dict]]:
     """Analyze performance patterns"""
     
     performance_categories = {
-        'no_speedup': [],      # <= 1.0x
+        'regression': [],      # < 1.0x (performance degradation)
+        'no_speedup': [],      # = 1.0x
         'minimal': [],         # 1.0x - 1.5x
         'moderate': [],        # 1.5x - 3.0x
         'good': [],           # 3.0x - 10.0x
@@ -60,14 +75,20 @@ def analyze_performance(results: Dict[str, Any]) -> Dict[str, List[Dict]]:
         
         if success and final_perf:
             speedup = final_perf.get('speedup')
-            if speedup is not None:
+            checksum_diff = final_perf.get('checksum_diff', 0.0)
+            
+            # Only consider it truly successful if checksum matches (diff is 0)
+            if speedup is not None and abs(checksum_diff) < 1e-6:
                 entry = {
                     'function': function_name,
                     'speedup': speedup,
-                    'iterations': result['total_iterations']
+                    'iterations': result['total_iterations'],
+                    'checksum_diff': checksum_diff
                 }
                 
-                if speedup <= 1.0:
+                if speedup < 1.0:
+                    performance_categories['regression'].append(entry)
+                elif speedup == 1.0:
                     performance_categories['no_speedup'].append(entry)
                 elif speedup < 1.5:
                     performance_categories['minimal'].append(entry)
@@ -92,10 +113,11 @@ def categorize_failure_reasons(failures: Dict[str, List[Dict]]) -> Dict[str, Lis
         'implementation_errors': []
     }
     
-    # Known patterns based on function characteristics
-    dependency_functions = ['s2111', 's233', 's242']  # Wavefront patterns
-    control_flow_functions = ['s244', 's342', 's161']  # Complex conditionals
-    memory_pattern_functions = ['s116', 's277', 's281']  # Irregular memory access
+    # Updated patterns based on the actual PE experiment results
+    # From the summary, we know these 8 functions failed: s126, s2111, s2251, s242, s244, s258, s3112, s343
+    dependency_functions = ['s2111', 's242', 's244', 's3112']  # Loop-carried dependencies
+    control_flow_functions = ['s126', 's258', 's343']  # Conditional updates/branching
+    memory_pattern_functions = ['s2251']  # Indirect addressing
     
     for error_type, error_list in failures.items():
         for error in error_list:
@@ -125,25 +147,27 @@ def analyze_poor_performance_reasons(performance: Dict[str, List[Dict]],
         'small_computation': []        # Computation too simple for vectorization
     }
     
-    # Analyze no_speedup and minimal improvement cases
-    poor_performers = performance['no_speedup'] + performance['minimal']
+    # Analyze regression, no_speedup and minimal improvement cases
+    poor_performers = performance.get('regression', []) + performance.get('no_speedup', []) + performance.get('minimal', [])
     
     for case in poor_performers:
         func = case['function']
         speedup = case['speedup']
         
-        # Heuristic categorization based on function patterns
-        if func in ['s116', 's141', 's161', 's281', 's342']:
-            if speedup < 0.7:
-                reasons['overhead_dominates'].append(func)
-            else:
-                reasons['sequential_dependencies'].append(func)
-        elif func in ['s2251', 's277', 's343']:
+        # Updated categorization based on PE results
+        # Functions with performance regression: s231, s277, s222, s232, s221, s141
+        if func in ['s231', 's277']:
             reasons['gather_scatter_heavy'].append(func)
-        elif func in ['s221', 's222', 's232']:
+        elif func in ['s222', 's232', 's221']:
             reasons['branch_divergence'].append(func)
-        else:
+        elif func in ['s141']:
+            reasons['overhead_dominates'].append(func)
+        elif speedup < 0.8:
+            reasons['overhead_dominates'].append(func)
+        elif func in ['s31111', 's261', 's161']:
             reasons['small_computation'].append(func)
+        else:
+            reasons['sequential_dependencies'].append(func)
     
     return reasons
 
@@ -161,14 +185,30 @@ def generate_report(results_file: str, attempts_dir: str) -> str:
     
     # Overall statistics
     total_functions = len(results['results'])
-    failed_functions = sum(len(v) for v in failures.values())
-    successful_functions = total_functions - len([r for r in results['results'] if not r['success']])
+    failed_functions = len([r for r in results['results'] if not r['success']])
+    
+    # Count truly successful functions (passing checksum AND showing improvement)
+    truly_successful = 0
+    for result in results['results']:
+        if result['success'] and result.get('final_performance_data'):
+            perf = result['final_performance_data']
+            if abs(perf.get('checksum_diff', float('inf'))) < 1e-6 and perf.get('speedup', 0) > 1.0:
+                truly_successful += 1
+    
+    # Count functions that passed checksum but had no improvement or regression
+    checksum_passed_but_no_improvement = 0
+    for result in results['results']:
+        if result['success'] and result.get('final_performance_data'):
+            perf = result['final_performance_data']
+            if abs(perf.get('checksum_diff', float('inf'))) < 1e-6 and perf.get('speedup', 0) <= 1.0:
+                checksum_passed_but_no_improvement += 1
     
     report.append(f"## Overall Statistics")
     report.append(f"- Total functions tested: {total_functions}")
-    report.append(f"- Successfully vectorized: {successful_functions}")
-    report.append(f"- Failed to vectorize: {len([r for r in results['results'] if not r['success']])}")
-    report.append(f"- Success rate: {successful_functions/total_functions*100:.1f}%\n")
+    report.append(f"- Successfully vectorized (checksum pass + speedup > 1.0x): {truly_successful}")
+    report.append(f"- Vectorized but no improvement (checksum pass + speedup <= 1.0x): {checksum_passed_but_no_improvement}")
+    report.append(f"- Failed to vectorize: {failed_functions}")
+    report.append(f"- True success rate: {truly_successful/total_functions*100:.1f}%\n")
     
     # Failure analysis
     report.append("## Failure Analysis\n")
@@ -258,8 +298,8 @@ def main():
         attempts_dir = sys.argv[1].replace("tsvc_vectorization_results.json", "tsvc_vectorized_attempts")
     else:
         # Default to PE experiment results
-        results_file = "/home/qinxiao/workspace/vectorizer-PE/tsvc_vectorization_results.json"
-        attempts_dir = "/home/qinxiao/workspace/vectorizer-PE/tsvc_vectorized_attempts"
+        results_file = "/home/qinxiao/workspace/vectorizer_PE/tsvc_vectorization_results.json"
+        attempts_dir = "/home/qinxiao/workspace/vectorizer_PE/tsvc_vectorized_attempts"
     
     report = generate_report(results_file, attempts_dir)
     print(report)

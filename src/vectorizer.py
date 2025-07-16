@@ -147,7 +147,7 @@ class TSVCVectorizerExperiment:
             'arrays_used': sorted(list(arrays_used))
         }
     
-    def get_system_prompt(self, func_name, full_function_code):
+    def get_system_prompt(self, full_function_code):
         """Generate the system prompt for vectorization with the original function included"""
         
         # Extract return expression from the function code
@@ -182,12 +182,17 @@ Key requirements based on the original function:
 - Call dummy() the same number of times as the original (typically inside the 'nl' loop)
 - Arrays are already declared globally - do NOT redeclare them
 
-Advanced vectorization strategies (to beat compiler auto-vectorization):
-1. **Complex dependency analysis** - Manually handle dependencies the compiler can't optimize
-2. **Multi-stage vectorization** - Break complex loops into phases for better efficiency
-3. **Memory access optimization** - Use prefetching and optimal memory patterns
-4. **Loop restructuring** - Interchange, unroll, or split loops in ways the compiler won't
-5. **Specialized intrinsics** - Use specific AVX2 operations the compiler might miss"""
+When doing vectorization analysis, follow these steps:
+1. Simplify the case by setting the loop iterations to a small number and enumerate the process as the code written.
+2. When enumerating, recognize and remove overwritten assignments and calculations that cancel each other out to make the dependencies clear.
+3. For the rest of operations, identify which element is referred as its original value and which one is referred as its updated value.
+   CRITICAL: If a[i] depends on a[j] and a[j] might update during the loop, you must split the vectorization into phases:
+   - Phase 1: Process elements that use original values
+   - Phase 2: Process elements that use updated values
+4. Load original values(not updated if executing sequentially like a[i+1]) directly from memory first, then compute elements that use original values, then store these elements.
+   After that, load the updated values from memory, then compute elements that use updated values, finally store these elements.
+5. Make necessary unrolling, loop distribution, loop interchanging, statement reordering based on step 3 & 4. Feel free to optimize and restructure as needed.
+6. Understand the pattern, then generate the actual vectorized code for the full loop range, ensuring final results match the original."""
     
     def vectorizer_agent(self, func_name, feedback=None):
         """Generate vectorized code using Anthropic API"""
@@ -198,11 +203,11 @@ Advanced vectorization strategies (to beat compiler auto-vectorization):
         # Create prompts based on whether this is initial attempt or repair
         if feedback is None:
             # Initial attempt - system prompt contains the function
-            system_prompt = self.get_system_prompt(func_name, full_function_code)
+            system_prompt = self.get_system_prompt(full_function_code)
             user_message = "Generate the vectorized version of the function."
         else:
             # Repair attempt - include error feedback
-            system_prompt = self.get_system_prompt(func_name, full_function_code)
+            system_prompt = self.get_system_prompt(full_function_code)
             
             if feedback['error_type'] == 'compilation':
                 user_message = f"""The previous attempt had compilation errors:
@@ -919,7 +924,7 @@ real_t test(real_t* A){
         
         # Build the complete prompt that was sent to LLM
         full_function_code = self.test_functions[func_name]['code']
-        system_prompt = self.get_system_prompt(func_name, full_function_code)
+        system_prompt = self.get_system_prompt(full_function_code)
         
         if feedback is None:
             user_prompt = "Generate the vectorized version of the function."

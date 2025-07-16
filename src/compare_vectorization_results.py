@@ -65,6 +65,17 @@ def compare_results(file1_path, file2_path):
     
     return comparison, data1, data2
 
+def categorize_by_performance(speedup):
+    """Categorize based on speedup value"""
+    if speedup is None:
+        return "failure"
+    elif speedup < 1.0:
+        return "regression"
+    elif speedup < 1.5:
+        return "minimal_improvement"
+    else:
+        return "success"
+
 def print_detailed_comparison(comparison, data1, data2):
     """Print detailed comparison results"""
     print("="*100)
@@ -74,14 +85,46 @@ def print_detailed_comparison(comparison, data1, data2):
     print(f"File 2: {data2.get('experiment', 'Unknown')}")
     print()
     
+    # Categorize results
+    categories1 = {"failure": [], "regression": [], "minimal_improvement": [], "success": []}
+    categories2 = {"failure": [], "regression": [], "minimal_improvement": [], "success": []}
+    
+    for c in comparison:
+        if not c['success_file1']:
+            categories1["failure"].append(c)
+        else:
+            cat = categorize_by_performance(c['speedup_file1'])
+            categories1[cat].append(c)
+            
+        if not c['success_file2']:
+            categories2["failure"].append(c)
+        else:
+            cat = categorize_by_performance(c['speedup_file2'])
+            categories2[cat].append(c)
+    
+    # Print category summary
+    print("PERFORMANCE CATEGORY SUMMARY:")
+    print("-"*80)
+    print(f"{'Category':<20} {'Baseline':<15} {'With PE':<15} {'Change':<20}")
+    print("-"*80)
+    for cat in ["failure", "regression", "minimal_improvement", "success"]:
+        count1 = len(categories1[cat])
+        count2 = len(categories2[cat])
+        change = count2 - count1
+        change_str = f"{change:+d}" if change != 0 else "0"
+        print(f"{cat:<20} {count1:<15} {count2:<15} {change_str:<20}")
+    
+    print(f"\n{'Total Functions':<20} {len(comparison):<15} {len(comparison):<15}")
+    print()
+    
     # Success rate summary
     success1 = sum(1 for c in comparison if c['success_file1'])
     success2 = sum(1 for c in comparison if c['success_file2'])
     total = len(comparison)
     
-    print(f"Overall Success Rates:")
-    print(f"  File 1: {success1}/{total} ({success1/total*100:.1f}%)")
-    print(f"  File 2: {success2}/{total} ({success2/total*100:.1f}%)")
+    print(f"Overall Success Rates (not failed):")
+    print(f"  Baseline: {success1}/{total} ({success1/total*100:.1f}%)")
+    print(f"  With PE:  {success2}/{total} ({success2/total*100:.1f}%)")
     print()
     
     # Functions that succeeded in one but failed in the other
@@ -148,7 +191,7 @@ def print_detailed_comparison(comparison, data1, data2):
 if __name__ == "__main__":
     # Updated to use current experiment results
     file1 = "/home/qinxiao/workspace/vectorizer/tsvc_vectorization_results.json"  # Baseline
-    file2 = "/home/qinxiao/workspace/vectorizer-PE/tsvc_vectorization_results.json"  # PE-enhanced
+    file2 = "/home/qinxiao/workspace/vectorizer_PE/tsvc_vectorization_results.json"  # PE-enhanced (note: underscore not hyphen)
     
     comparison, data1, data2 = compare_results(file1, file2)
     print_detailed_comparison(comparison, data1, data2)
