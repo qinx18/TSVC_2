@@ -2,29 +2,28 @@
 
 ## Overall Performance Summary
 - Functions analyzed: 50
-- Average success rate: 92.0% ± 27.4%
-- Average speedup: 3.70x ± 7.63x
+- Average success rate: 92.8% ± 22.9%
+- Average speedup: 3.50x ± 5.10x
 - Confidence level: 95%
 
 ## Statistical Categories
 
-### Variable Success: 50 functions
-- Functions: s1113, s112, s114, s115, s116, s1161, s1213, s123, s1244, s126
-- ... and 40 more
+### Variable Success: 2 functions
+- Functions: s126, s242
 
-### Consistent High Performance: 13 functions
-- Functions: s1113, s115, s1161, s1213, s1244, s212, s235, s256, s275, s292
-- ... and 3 more
+### Consistent High Performance: 19 functions
+- Functions: s1113, s115, s1161, s1244, s126, s211, s212, s2233, s242, s256
+- ... and 9 more
 
-### Variable Performance: 4 functions
-- Functions: s2251, s241, s293, s322
+### Variable Performance: 7 functions
+- Functions: s2233, s231, s235, s241, s256, s3110, s31111
 
-### Stable Functions: 39 functions
-- Functions: s1113, s112, s114, s115, s116, s1161, s1213, s123, s1244, s141
-- ... and 29 more
+### Stable Functions: 23 functions
+- Functions: s1113, s112, s114, s115, s1161, s123, s1244, s126, s141, s161
+- ... and 13 more
 
-### Highly Variable: 4 functions
-- Functions: s2251, s241, s293, s322
+### Highly Variable: 7 functions
+- Functions: s2233, s231, s235, s241, s256, s3110, s31111
 
 ### Compiler Consistent: 50 functions
 - Functions: s1113, s112, s114, s115, s116, s1161, s1213, s123, s1244, s126
@@ -33,546 +32,554 @@
 ## Function-Level Statistical Analysis
 
 ### s1113
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 6.04x ± 0.02x
-- **Speedup 95% CI**: 5.84x - 6.23x
-- **Coefficient of variation**: 0.00
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 5.74x ± 0.37x
+- **Speedup 95% CI**: 5.48x - 6.00x
+- **Coefficient of variation**: 0.06
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s112
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 1.02x ± 0.01x
-- **Speedup 95% CI**: 0.96x - 1.09x
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 1.03x ± 0.01x
+- **Speedup 95% CI**: 1.02x - 1.04x
 - **Coefficient of variation**: 0.01
-- **Successful runs**: 2/2
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 100.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s114
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
 - **Average speedup**: 1.46x ± 0.01x
-- **Speedup 95% CI**: 1.40x - 1.53x
-- **Coefficient of variation**: 0.00
-- **Successful runs**: 2/2
+- **Speedup 95% CI**: 1.46x - 1.47x
+- **Coefficient of variation**: 0.01
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s115
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 6.72x ± 0.04x
-- **Speedup 95% CI**: 6.41x - 7.04x
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 6.71x ± 0.07x
+- **Speedup 95% CI**: 6.66x - 6.76x
 - **Coefficient of variation**: 0.01
-- **Successful runs**: 2/2
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 100.0%
 
-### s116
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 1.67x ± 0.01x
-- **Speedup 95% CI**: 1.54x - 1.80x
-- **Coefficient of variation**: 0.01
-- **Successful runs**: 2/2
-- **Average iterations**: 1.5 ± 0.7
-- **Original vectorized rate**: 0.0%
-- **LLM vectorized rate**: 0.0%
-
 ### s1161
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 4.76x ± 0.06x
-- **Speedup 95% CI**: 4.19x - 5.34x
-- **Coefficient of variation**: 0.01
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 4.74x ± 0.10x
+- **Speedup 95% CI**: 4.67x - 4.82x
+- **Coefficient of variation**: 0.02
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s1213
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 2.68x ± 0.03x
-- **Speedup 95% CI**: 2.43x - 2.93x
-- **Coefficient of variation**: 0.01
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 1.98x ± 0.89x
+- **Speedup 95% CI**: 1.34x - 2.61x
+- **Coefficient of variation**: 0.45
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s123
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 1.26x ± 0.01x
-- **Speedup 95% CI**: 1.13x - 1.39x
-- **Coefficient of variation**: 0.01
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 1.24x ± 0.10x
+- **Speedup 95% CI**: 1.16x - 1.31x
+- **Coefficient of variation**: 0.08
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s1244
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 6.36x ± 0.01x
-- **Speedup 95% CI**: 6.23x - 6.49x
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 6.37x ± 0.02x
+- **Speedup 95% CI**: 6.36x - 6.38x
 - **Coefficient of variation**: 0.00
-- **Successful runs**: 2/2
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s141
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 0.98x ± 0.01x
-- **Speedup 95% CI**: 0.85x - 1.11x
-- **Coefficient of variation**: 0.01
-- **Successful runs**: 2/2
-- **Average iterations**: 1.5 ± 0.7
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 0.96x ± 0.03x
+- **Speedup 95% CI**: 0.94x - 0.99x
+- **Coefficient of variation**: 0.03
+- **Successful runs**: 10/10
+- **Average iterations**: 1.5 ± 0.8
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s161
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 1.30x ± 0.14x
-- **Speedup 95% CI**: 0.03x - 2.57x
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 1.22x ± 0.14x
+- **Speedup 95% CI**: 1.12x - 1.31x
 - **Coefficient of variation**: 0.11
-- **Successful runs**: 2/2
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s211
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 1.91x ± 0.01x
-- **Speedup 95% CI**: 1.78x - 2.04x
-- **Coefficient of variation**: 0.01
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 3.11x ± 1.05x
+- **Speedup 95% CI**: 2.37x - 3.86x
+- **Coefficient of variation**: 0.34
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
-- **LLM vectorized rate**: 0.0%
+- **LLM vectorized rate**: 10.0%
 
 ### s212
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 4.22x ± 0.03x
-- **Speedup 95% CI**: 3.97x - 4.47x
-- **Coefficient of variation**: 0.01
-- **Successful runs**: 2/2
-- **Average iterations**: 1.0 ± 0.0
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 4.12x ± 0.06x
+- **Speedup 95% CI**: 4.08x - 4.17x
+- **Coefficient of variation**: 0.02
+- **Successful runs**: 10/10
+- **Average iterations**: 1.1 ± 0.3
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s221
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 0.90x ± 0.01x
-- **Speedup 95% CI**: 0.83x - 0.96x
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 0.89x ± 0.01x
+- **Speedup 95% CI**: 0.89x - 0.90x
 - **Coefficient of variation**: 0.01
-- **Successful runs**: 2/2
-- **Average iterations**: 1.0 ± 0.0
+- **Successful runs**: 10/10
+- **Average iterations**: 1.1 ± 0.3
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s222
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 0.83x ± 0.00x
-- **Speedup 95% CI**: 0.83x - 0.83x
-- **Coefficient of variation**: 0.00
-- **Successful runs**: 2/2
-- **Average iterations**: 1.0 ± 0.0
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 0.86x ± 0.11x
+- **Speedup 95% CI**: 0.78x - 0.94x
+- **Coefficient of variation**: 0.13
+- **Successful runs**: 10/10
+- **Average iterations**: 1.8 ± 0.6
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s2233
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 1.02x ± 0.01x
-- **Speedup 95% CI**: 0.95x - 1.08x
-- **Coefficient of variation**: 0.01
-- **Successful runs**: 2/2
-- **Average iterations**: 2.0 ± 1.4
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 5.62x ± 4.71x
+- **Speedup 95% CI**: 2.25x - 8.98x
+- **Coefficient of variation**: 0.84
+- **Successful runs**: 10/10
+- **Average iterations**: 1.4 ± 0.7
 - **Original vectorized rate**: 100.0%
-- **LLM vectorized rate**: 50.0%
-
-### s2251
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 1.86x ± 1.36x
-- **Speedup 95% CI**: -10.40x - 14.13x
-- **Coefficient of variation**: 0.73
-- **Successful runs**: 2/2
-- **Average iterations**: 2.0 ± 1.4
-- **Original vectorized rate**: 0.0%
-- **LLM vectorized rate**: 0.0%
+- **LLM vectorized rate**: 20.0%
 
 ### s231
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 0.36x ± 0.01x
-- **Speedup 95% CI**: 0.23x - 0.49x
-- **Coefficient of variation**: 0.04
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 0.96x ± 0.51x
+- **Speedup 95% CI**: 0.59x - 1.33x
+- **Coefficient of variation**: 0.54
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 100.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s232
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 0.70x ± 0.02x
-- **Speedup 95% CI**: 0.50x - 0.89x
-- **Coefficient of variation**: 0.03
-- **Successful runs**: 2/2
-- **Average iterations**: 1.0 ± 0.0
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 0.84x ± 0.35x
+- **Speedup 95% CI**: 0.59x - 1.09x
+- **Coefficient of variation**: 0.41
+- **Successful runs**: 10/10
+- **Average iterations**: 1.2 ± 0.6
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s233
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 1.46x ± 0.66x
-- **Speedup 95% CI**: -4.45x - 7.36x
-- **Coefficient of variation**: 0.45
-- **Successful runs**: 2/2
-- **Average iterations**: 2.0 ± 1.4
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 1.58x ± 0.40x
+- **Speedup 95% CI**: 1.29x - 1.87x
+- **Coefficient of variation**: 0.26
+- **Successful runs**: 10/10
+- **Average iterations**: 1.5 ± 0.7
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s235
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 3.91x ± 0.03x
-- **Speedup 95% CI**: 3.66x - 4.16x
-- **Coefficient of variation**: 0.01
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 2.73x ± 1.41x
+- **Speedup 95% CI**: 1.72x - 3.74x
+- **Coefficient of variation**: 0.52
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 100.0%
-- **LLM vectorized rate**: 0.0%
+- **LLM vectorized rate**: 10.0%
 
 ### s241
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 2.02x ± 1.63x
-- **Speedup 95% CI**: -12.59x - 16.63x
-- **Coefficient of variation**: 0.81
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 2.79x ± 1.41x
+- **Speedup 95% CI**: 1.78x - 3.80x
+- **Coefficient of variation**: 0.50
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s256
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 52.95x ± 0.01x
-- **Speedup 95% CI**: 52.82x - 53.08x
-- **Coefficient of variation**: 0.00
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 35.26x ± 25.06x
+- **Speedup 95% CI**: 17.33x - 53.19x
+- **Coefficient of variation**: 0.71
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
-- **LLM vectorized rate**: 0.0%
+- **LLM vectorized rate**: 10.0%
 
 ### s258
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 1.46x ± 0.07x
-- **Speedup 95% CI**: 0.82x - 2.10x
-- **Coefficient of variation**: 0.05
-- **Successful runs**: 2/2
-- **Average iterations**: 1.0 ± 0.0
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 1.61x ± 0.38x
+- **Speedup 95% CI**: 1.34x - 1.89x
+- **Coefficient of variation**: 0.24
+- **Successful runs**: 10/10
+- **Average iterations**: 1.2 ± 0.4
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s261
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 1.39x ± 0.14x
-- **Speedup 95% CI**: 0.12x - 2.66x
-- **Coefficient of variation**: 0.10
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 2.08x ± 1.02x
+- **Speedup 95% CI**: 1.35x - 2.81x
+- **Coefficient of variation**: 0.49
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s275
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 6.97x ± 0.09x
-- **Speedup 95% CI**: 6.15x - 7.80x
-- **Coefficient of variation**: 0.01
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 7.19x ± 0.45x
+- **Speedup 95% CI**: 6.87x - 7.51x
+- **Coefficient of variation**: 0.06
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s277
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 0.74x ± 0.33x
-- **Speedup 95% CI**: -2.18x - 3.66x
-- **Coefficient of variation**: 0.44
-- **Successful runs**: 2/2
-- **Average iterations**: 2.0 ± 1.4
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 0.61x ± 0.22x
+- **Speedup 95% CI**: 0.46x - 0.77x
+- **Coefficient of variation**: 0.36
+- **Successful runs**: 10/10
+- **Average iterations**: 1.7 ± 0.8
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s281
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 3.10x ± 0.13x
-- **Speedup 95% CI**: 1.90x - 4.31x
-- **Coefficient of variation**: 0.04
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 3.10x ± 0.11x
+- **Speedup 95% CI**: 3.02x - 3.18x
+- **Coefficient of variation**: 0.03
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
-- **LLM vectorized rate**: 50.0%
+- **LLM vectorized rate**: 20.0%
 
 ### s291
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 5.04x ± 0.92x
-- **Speedup 95% CI**: -3.22x - 13.30x
-- **Coefficient of variation**: 0.18
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 4.80x ± 0.66x
+- **Speedup 95% CI**: 4.32x - 5.27x
+- **Coefficient of variation**: 0.14
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s292
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 5.21x ± 0.00x
-- **Speedup 95% CI**: 5.21x - 5.21x
-- **Coefficient of variation**: 0.00
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 5.29x ± 0.38x
+- **Speedup 95% CI**: 5.02x - 5.56x
+- **Coefficient of variation**: 0.07
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s293
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 6.35x ± 3.91x
-- **Speedup 95% CI**: -28.78x - 41.49x
-- **Coefficient of variation**: 0.62
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 6.34x ± 2.91x
+- **Speedup 95% CI**: 4.26x - 8.43x
+- **Coefficient of variation**: 0.46
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s3110
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 1.19x ± 0.00x
-- **Speedup 95% CI**: 1.19x - 1.19x
-- **Coefficient of variation**: 0.00
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 1.50x ± 0.98x
+- **Speedup 95% CI**: 0.80x - 2.20x
+- **Coefficient of variation**: 0.65
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s31111
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 0.87x ± 0.06x
-- **Speedup 95% CI**: 0.36x - 1.38x
-- **Coefficient of variation**: 0.07
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 2.48x ± 3.48x
+- **Speedup 95% CI**: -0.00x - 4.97x
+- **Coefficient of variation**: 1.40
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s3112
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 1.01x ± 0.00x
-- **Speedup 95% CI**: 1.01x - 1.01x
-- **Coefficient of variation**: 0.00
-- **Successful runs**: 2/2
-- **Average iterations**: 1.0 ± 0.0
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 1.00x ± 0.01x
+- **Speedup 95% CI**: 1.00x - 1.01x
+- **Coefficient of variation**: 0.01
+- **Successful runs**: 10/10
+- **Average iterations**: 1.5 ± 0.7
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s318
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 2.96x ± 1.41x
-- **Speedup 95% CI**: -9.69x - 15.60x
-- **Coefficient of variation**: 0.48
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 2.46x ± 1.08x
+- **Speedup 95% CI**: 1.68x - 3.23x
+- **Coefficient of variation**: 0.44
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s321
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 0.97x ± 0.06x
-- **Speedup 95% CI**: 0.46x - 1.48x
-- **Coefficient of variation**: 0.06
-- **Successful runs**: 2/2
-- **Average iterations**: 1.0 ± 0.0
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 0.91x ± 0.16x
+- **Speedup 95% CI**: 0.79x - 1.02x
+- **Coefficient of variation**: 0.18
+- **Successful runs**: 10/10
+- **Average iterations**: 1.4 ± 0.5
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s322
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 1.95x ± 1.81x
-- **Speedup 95% CI**: -14.31x - 18.21x
-- **Coefficient of variation**: 0.93
-- **Successful runs**: 2/2
-- **Average iterations**: 1.5 ± 0.7
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 2.33x ± 1.09x
+- **Speedup 95% CI**: 1.55x - 3.12x
+- **Coefficient of variation**: 0.47
+- **Successful runs**: 10/10
+- **Average iterations**: 1.5 ± 0.5
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s323
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 2.31x ± 0.01x
-- **Speedup 95% CI**: 2.18x - 2.44x
-- **Coefficient of variation**: 0.01
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 2.18x ± 0.46x
+- **Speedup 95% CI**: 1.85x - 2.51x
+- **Coefficient of variation**: 0.21
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s332
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 5.92x ± 0.02x
-- **Speedup 95% CI**: 5.72x - 6.11x
-- **Coefficient of variation**: 0.00
-- **Successful runs**: 2/2
-- **Average iterations**: 1.5 ± 0.7
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 5.23x ± 1.14x
+- **Speedup 95% CI**: 4.41x - 6.05x
+- **Coefficient of variation**: 0.22
+- **Successful runs**: 10/10
+- **Average iterations**: 1.7 ± 0.5
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s341
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 1.42x ± 0.00x
-- **Speedup 95% CI**: 1.42x - 1.42x
-- **Coefficient of variation**: 0.00
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 1.53x ± 0.17x
+- **Speedup 95% CI**: 1.41x - 1.65x
+- **Coefficient of variation**: 0.11
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s342
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 1.01x ± 0.00x
-- **Speedup 95% CI**: 1.01x - 1.01x
-- **Coefficient of variation**: 0.00
-- **Successful runs**: 2/2
-- **Average iterations**: 1.0 ± 0.0
-- **Original vectorized rate**: 0.0%
-- **LLM vectorized rate**: 0.0%
-
-### s343
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 1.09x ± 0.01x
-- **Speedup 95% CI**: 0.96x - 1.22x
-- **Coefficient of variation**: 0.01
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 0.85x ± 0.21x
+- **Speedup 95% CI**: 0.70x - 1.00x
+- **Coefficient of variation**: 0.25
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s442
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 4.08x ± 0.13x
-- **Speedup 95% CI**: 2.88x - 5.29x
-- **Coefficient of variation**: 0.03
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 3.89x ± 0.20x
+- **Speedup 95% CI**: 3.75x - 4.03x
+- **Coefficient of variation**: 0.05
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
-- **Original vectorized rate**: 0.0%
-- **LLM vectorized rate**: 0.0%
-
-### s451
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 0.99x ± 0.01x
-- **Speedup 95% CI**: 0.93x - 1.06x
-- **Coefficient of variation**: 0.01
-- **Successful runs**: 2/2
-- **Average iterations**: 1.5 ± 0.7
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s481
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 3.77x ± 0.32x
-- **Speedup 95% CI**: 0.91x - 6.62x
-- **Coefficient of variation**: 0.08
-- **Successful runs**: 2/2
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 3.19x ± 0.94x
+- **Speedup 95% CI**: 2.52x - 3.86x
+- **Coefficient of variation**: 0.30
+- **Successful runs**: 10/10
 - **Average iterations**: 1.0 ± 0.0
+- **Original vectorized rate**: 0.0%
+- **LLM vectorized rate**: 10.0%
+
+### s482
+- **Runs**: 10
+- **Success rate**: 100.0% (95% CI: 72.2% - 100.0%)
+- **Average speedup**: 3.57x ± 1.19x
+- **Speedup 95% CI**: 2.72x - 4.42x
+- **Coefficient of variation**: 0.33
+- **Successful runs**: 10/10
+- **Average iterations**: 1.1 ± 0.3
+- **Original vectorized rate**: 0.0%
+- **LLM vectorized rate**: 20.0%
+
+### s116
+- **Runs**: 10
+- **Success rate**: 90.0% (95% CI: 59.6% - 98.2%)
+- **Average speedup**: 1.84x ± 0.89x
+- **Speedup 95% CI**: 1.15x - 2.53x
+- **Coefficient of variation**: 0.48
+- **Successful runs**: 9/10
+- **Average iterations**: 1.7 ± 0.8
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
-### s482
-- **Runs**: 2
-- **Success rate**: 100.0% (95% CI: 34.2% - 100.0%)
-- **Average speedup**: 3.97x ± 0.73x
-- **Speedup 95% CI**: -2.58x - 10.51x
-- **Coefficient of variation**: 0.18
-- **Successful runs**: 2/2
-- **Average iterations**: 1.0 ± 0.0
+### s2251
+- **Runs**: 10
+- **Success rate**: 90.0% (95% CI: 59.6% - 98.2%)
+- **Average speedup**: 1.50x ± 0.73x
+- **Speedup 95% CI**: 0.93x - 2.06x
+- **Coefficient of variation**: 0.49
+- **Successful runs**: 9/10
+- **Average iterations**: 1.4 ± 0.8
+- **Original vectorized rate**: 0.0%
+- **LLM vectorized rate**: 0.0%
+
+### s343
+- **Runs**: 10
+- **Success rate**: 90.0% (95% CI: 59.6% - 98.2%)
+- **Average speedup**: 1.17x ± 0.24x
+- **Speedup 95% CI**: 0.99x - 1.36x
+- **Coefficient of variation**: 0.21
+- **Successful runs**: 9/10
+- **Average iterations**: 1.2 ± 0.6
+- **Original vectorized rate**: 0.0%
+- **LLM vectorized rate**: 0.0%
+
+### s451
+- **Runs**: 10
+- **Success rate**: 90.0% (95% CI: 59.6% - 98.2%)
+- **Average speedup**: 1.02x ± 0.02x
+- **Speedup 95% CI**: 1.00x - 1.04x
+- **Coefficient of variation**: 0.02
+- **Successful runs**: 9/10
+- **Average iterations**: 1.4 ± 0.7
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s126
-- **Runs**: 2
-- **Success rate**: 0.0% (95% CI: 0.0% - 65.8%)
-- **Average iterations**: 3.0 ± 0.0
+- **Runs**: 10
+- **Success rate**: 60.0% (95% CI: 31.3% - 83.2%)
+- **Average speedup**: 7.66x ± 0.31x
+- **Speedup 95% CI**: 7.34x - 7.98x
+- **Coefficient of variation**: 0.04
+- **Successful runs**: 6/10
+- **Average iterations**: 2.2 ± 0.9
+- **Original vectorized rate**: 0.0%
+- **LLM vectorized rate**: 0.0%
+
+### s242
+- **Runs**: 10
+- **Success rate**: 20.0% (95% CI: 5.7% - 51.0%)
+- **Average speedup**: 2.21x ± 0.01x
+- **Speedup 95% CI**: 2.14x - 2.27x
+- **Coefficient of variation**: 0.00
+- **Successful runs**: 2/10
+- **Average iterations**: 2.8 ± 0.4
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ### s2111
-- **Runs**: 2
-- **Success rate**: 0.0% (95% CI: 0.0% - 65.8%)
+- **Runs**: 10
+- **Success rate**: 0.0% (95% CI: 0.0% - 27.8%)
 - **Average iterations**: 3.0 ± 0.0
 - **Original vectorized rate**: 0.0%
-- **LLM vectorized rate**: 50.0%
-
-### s242
-- **Runs**: 2
-- **Success rate**: 0.0% (95% CI: 0.0% - 65.8%)
-- **Average iterations**: 3.0 ± 0.0
-- **Original vectorized rate**: 0.0%
-- **LLM vectorized rate**: 0.0%
+- **LLM vectorized rate**: 10.0%
 
 ### s244
-- **Runs**: 2
-- **Success rate**: 0.0% (95% CI: 0.0% - 65.8%)
+- **Runs**: 10
+- **Success rate**: 0.0% (95% CI: 0.0% - 27.8%)
 - **Average iterations**: 3.0 ± 0.0
 - **Original vectorized rate**: 0.0%
 - **LLM vectorized rate**: 0.0%
 
 ## Stability Analysis
 
-### Stable Performance (CV < 0.2): 39 functions
-- s1113, s112, s114, s115, s116, s1161, s1213, s123, s1244, s141, s161, s211, s212, s221, s222, s2233, s231, s232, s235, s256, s258, s261, s275, s281, s291, s292, s3110, s31111, s3112, s321, s323, s332, s341, s342, s343, s442, s451, s481, s482
+### Stable Performance (CV < 0.2): 23 functions
+- s1113, s112, s114, s115, s1161, s123, s1244, s126, s141, s161, s212, s221, s222, s242, s275, s281, s291, s292, s3112, s321, s341, s442, s451
 
-### Variable Performance (CV > 0.5): 4 functions
-- s2251, s241, s293, s322
+### Variable Performance (CV > 0.5): 7 functions
+- s2233, s231, s235, s241, s256, s3110, s31111
 
 ## Statistical Recommendations
 
