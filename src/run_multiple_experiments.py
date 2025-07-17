@@ -50,6 +50,12 @@ class MultipleExperimentRunner:
             f'self.test_functions = {{}}\n        \n        # Set random seed for reproducibility\n        import random\n        import numpy as np\n        random.seed({seed})\n        np.random.seed({seed})'
         )
         
+        # Fix cleanup_workspace() to work with experiment directories
+        modified_content = modified_content.replace(
+            'def cleanup_workspace():\n    """Clean up workspace before running vectorizer"""\n    # Calculate workspace root relative to this script\'s location\n    script_dir = os.path.dirname(os.path.abspath(__file__))\n    workspace_dir = os.path.join(script_dir, \'../..\')\n    workspace_dir = os.path.abspath(workspace_dir)',
+            f'def cleanup_workspace():\n    """Clean up workspace before running vectorizer"""\n    # Use current working directory for experiments\n    workspace_dir = os.getcwd()'
+        )
+        
         # Add imports at the top if not already present
         if "import random" not in modified_content[:100]:
             modified_content = modified_content.replace(
@@ -71,6 +77,18 @@ class MultipleExperimentRunner:
         modified_content = modified_content.replace(
             'results_file = os.path.join(workspace_dir, "tsvc_vectorization_results.json")',
             f'results_file = os.path.join("{output_dir}", "tsvc_vectorization_results.json")'
+        )
+        
+        # Also fix the main results_file path in run_experiment()
+        modified_content = modified_content.replace(
+            'results_file = os.path.join(workspace_root, \'tsvc_vectorization_results.json\')',
+            f'results_file = os.path.join("{output_dir}", "tsvc_vectorization_results.json")'
+        )
+        
+        # Fix workspace_root calculation for experiment directories
+        modified_content = modified_content.replace(
+            'workspace_root = os.path.join(os.path.dirname(__file__), \'../..\')\n        workspace_root = os.path.abspath(workspace_root)',
+            f'workspace_root = "{output_dir}"'
         )
         
         # Write modified vectorizer
@@ -125,14 +143,40 @@ class MultipleExperimentRunner:
             print(f"Starting experiment in {output_dir}")
             start_time = time.time()
             
-            result = subprocess.run(
+            # Use Popen for real-time output
+            process = subprocess.Popen(
                 cmd,
                 cwd=output_dir,
                 env=env,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
-                timeout=7200  # 2 hour timeout
+                bufsize=1,
+                universal_newlines=True
             )
+            
+            # Stream output in real-time with timeout
+            output_lines = []
+            timeout_seconds = 7200  # 2 hours
+            
+            try:
+                while True:
+                    line = process.stdout.readline()
+                    if not line and process.poll() is not None:
+                        break
+                    if line:
+                        print(f"[Run {run_idx + 1}] {line.rstrip()}")
+                        output_lines.append(line)
+                
+                # Wait for completion
+                process.wait(timeout=timeout_seconds)
+                result_stdout = ''.join(output_lines)
+                result_stderr = ""
+                returncode = process.returncode
+                
+            except subprocess.TimeoutExpired:
+                process.kill()
+                raise subprocess.TimeoutExpired(cmd, timeout_seconds)
             
             end_time = time.time()
             duration = end_time - start_time
@@ -143,17 +187,17 @@ class MultipleExperimentRunner:
                 f.write(f"Experiment Run {run_idx + 1}\\n")
                 f.write(f"Seed: {seed}\\n")
                 f.write(f"Duration: {duration:.2f} seconds\\n")
-                f.write(f"Return code: {result.returncode}\\n\\n")
+                f.write(f"Return code: {returncode}\\n\\n")
                 f.write("STDOUT:\\n")
-                f.write(result.stdout)
+                f.write(result_stdout)
                 f.write("\\nSTDERR:\\n")
-                f.write(result.stderr)
+                f.write(result_stderr)
             
-            if result.returncode == 0:
+            if returncode == 0:
                 print(f"✓ Experiment {run_idx + 1} completed successfully ({duration:.1f}s)")
                 return True
             else:
-                print(f"✗ Experiment {run_idx + 1} failed (return code: {result.returncode})")
+                print(f"✗ Experiment {run_idx + 1} failed (return code: {returncode})")
                 return False
                 
         except subprocess.TimeoutExpired:

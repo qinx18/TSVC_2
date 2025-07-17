@@ -5,3 +5,22 @@
 *.cg
 *.opt
 bin/
+
+# Test experiment directories
+experiment_run_*/
+tsvc_results/
+tsvc_vectorized_attempts/
+
+# Test outputs
+test_executable_*
+test_output_*.txt
+compiler_output_*.txt
+experiment_log.txt
+
+# Large result files (uncomment if you want to ignore these)
+# tsvc_vectorization_results.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
