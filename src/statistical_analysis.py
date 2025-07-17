@@ -58,7 +58,8 @@ class VectorizationStatistics:
             'vectorized_vectorized': [],
             'checksum_diffs': [],
             'iterations': [],
-            'run_metadata': []
+            'run_metadata': [],
+            'true_successes': []  # Success with speedup >= 1.0
         })
         
         for run_idx, result_set in enumerate(all_results):
@@ -70,7 +71,8 @@ class VectorizationStatistics:
                 function_stats[func_name]['successes'].append(success)
                 function_stats[func_name]['iterations'].append(result.get('total_iterations', 0))
                 
-                # Performance data
+                # Performance data and true success determination
+                true_success = False
                 if success and result.get('final_performance_data'):
                     perf_data = result['final_performance_data']
                     speedup = perf_data.get('speedup')
@@ -79,6 +81,11 @@ class VectorizationStatistics:
                     if speedup is not None:
                         function_stats[func_name]['speedups'].append(speedup)
                         function_stats[func_name]['checksum_diffs'].append(abs(checksum_diff))
+                        # True success: checksum passes AND speedup >= 1.0
+                        if abs(checksum_diff) < 1e-6 and speedup >= 1.0:
+                            true_success = True
+                
+                function_stats[func_name]['true_successes'].append(true_success)
                 
                 # Vectorization info
                 for attempt in result.get('attempts', []):
@@ -174,10 +181,15 @@ class VectorizationStatistics:
             if n_runs == 0:
                 continue
             
-            # Success rate analysis
+            # Success rate analysis (basic success - checksum passes)
             success_count = sum(data['successes'])
             success_rate = success_count / n_runs
             success_ci = self.calculate_binomial_ci(success_count, n_runs)
+            
+            # True success rate analysis (checksum passes AND speedup >= 1.0)
+            true_success_count = sum(data['true_successes'])
+            true_success_rate = true_success_count / n_runs
+            true_success_ci = self.calculate_binomial_ci(true_success_count, n_runs)
             
             # Performance analysis
             speedup_stats = None
@@ -198,6 +210,9 @@ class VectorizationStatistics:
                 'success_rate': success_rate,
                 'success_ci': success_ci,
                 'success_count': success_count,
+                'true_success_rate': true_success_rate,
+                'true_success_ci': true_success_ci,
+                'true_success_count': true_success_count,
                 'speedup_stats': speedup_stats,
                 'original_vectorized_rate': original_vec_rate,
                 'vectorized_vectorized_rate': vectorized_vec_rate,
@@ -221,11 +236,11 @@ class VectorizationStatistics:
         }
         
         for func_name, stats in function_stats.items():
-            # Success rate analysis
-            if stats['success_ci'][0] > 0.8:
+            # Success rate analysis (using true success rate)
+            if stats['true_success_ci'][0] > 0.8:
                 categories['high_confidence_success'].append(func_name)
             
-            ci_width = stats['success_ci'][1] - stats['success_ci'][0]
+            ci_width = stats['true_success_ci'][1] - stats['true_success_ci'][0]
             if ci_width > 0.4:
                 categories['variable_success'].append(func_name)
             
@@ -260,25 +275,81 @@ class VectorizationStatistics:
         report = []
         report.append("# TSVC Vectorizer Statistical Analysis Report\n")
         
-        # Overall statistics
-        all_success_rates = [stats['success_rate'] for stats in function_stats.values()]
+        # Calculate overall statistics
+        all_true_success_rates = [stats['true_success_rate'] for stats in function_stats.values()]
         all_speedups = []
-        for stats in function_stats.values():
+        true_success_funcs = []
+        failed_funcs = []
+        no_improvement_funcs = []
+        
+        for func_name, stats in function_stats.items():
+            if stats['true_success_count'] > 0:
+                true_success_funcs.append(func_name)
+            if stats['success_count'] == 0:
+                failed_funcs.append(func_name)
+            elif stats['true_success_count'] == 0 and stats['success_count'] > 0:
+                no_improvement_funcs.append(func_name)
+                
             if stats['speedup_stats']:
                 all_speedups.extend([stats['speedup_stats']['mean']] * stats['speedup_stats']['n'])
         
-        overall_success_mean = np.mean(all_success_rates)
-        overall_success_std = np.std(all_success_rates, ddof=1) if len(all_success_rates) > 1 else 0
+        overall_true_success_mean = np.mean(all_true_success_rates)
+        overall_true_success_std = np.std(all_true_success_rates, ddof=1) if len(all_true_success_rates) > 1 else 0
         
         overall_speedup_mean = np.mean(all_speedups) if all_speedups else 0
         overall_speedup_std = np.std(all_speedups, ddof=1) if len(all_speedups) > 1 else 0
         
-        report.append(f"## Overall Performance Summary")
-        report.append(f"- Functions analyzed: {len(function_stats)}")
-        report.append(f"- Average success rate: {overall_success_mean:.1%} ± {overall_success_std:.1%}")
-        if all_speedups:
-            report.append(f"- Average speedup: {overall_speedup_mean:.2f}x ± {overall_speedup_std:.2f}x")
+        # Overall Statistics section
+        report.append(f"## Overall Statistics")
+        report.append(f"- Total functions tested: {len(function_stats)}")
+        report.append(f"- Successfully vectorized (checksum pass + speedup >= 1.0x): {len(true_success_funcs)}")
+        report.append(f"- Vectorized but no improvement (checksum pass + speedup < 1.0x): {len(no_improvement_funcs)}")
+        report.append(f"- Failed to vectorize: {len(failed_funcs)}")
+        report.append(f"- True success rate: {overall_true_success_mean:.1%}")
+        report.append(f"- Average speedup (all attempts): {overall_speedup_mean:.2f}x ± {overall_speedup_std:.2f}x")
         report.append(f"- Confidence level: {self.confidence_level:.0%}\n")
+        
+        # Performance Analysis
+        report.append("## Performance Analysis\n")
+        
+        # Categorize by performance
+        perf_categories = {
+            'regression': [],      # < 1.0x
+            'no_speedup': [],      # = 1.0x
+            'minimal': [],         # 1.0x - 1.5x
+            'moderate': [],        # 1.5x - 3.0x
+            'good': [],           # 3.0x - 10.0x
+            'excellent': []        # > 10.0x
+        }
+        
+        for func_name, stats in function_stats.items():
+            if stats['speedup_stats'] and stats['success_count'] > 0:
+                mean_speedup = stats['speedup_stats']['mean']
+                if mean_speedup < 1.0:
+                    perf_categories['regression'].append((func_name, mean_speedup))
+                elif mean_speedup == 1.0:
+                    perf_categories['no_speedup'].append((func_name, mean_speedup))
+                elif mean_speedup < 1.5:
+                    perf_categories['minimal'].append((func_name, mean_speedup))
+                elif mean_speedup < 3.0:
+                    perf_categories['moderate'].append((func_name, mean_speedup))
+                elif mean_speedup < 10.0:
+                    perf_categories['good'].append((func_name, mean_speedup))
+                else:
+                    perf_categories['excellent'].append((func_name, mean_speedup))
+        
+        report.append("### Performance Distribution:")
+        for category, funcs in perf_categories.items():
+            if funcs:
+                report.append(f"- **{category.capitalize()}**: {len(funcs)} functions")
+                if category in ['regression', 'no_speedup', 'minimal']:
+                    # Show all functions with their speedups for poor performers
+                    sorted_funcs = sorted(funcs, key=lambda x: x[1])
+                    func_list = ', '.join([f"{f[0]} ({f[1]:.2f}x)" for f in sorted_funcs[:12]])
+                    report.append(f"  - {func_list}")
+                    if len(funcs) > 12:
+                        report.append(f"  - ... and {len(funcs) - 12} more")
+        report.append("")
         
         # Category summary
         report.append("## Statistical Categories\n")
@@ -290,18 +361,54 @@ class VectorizationStatistics:
                     report.append(f"- ... and {len(functions) - 10} more")
                 report.append("")
         
+        # Compiler Vectorization Analysis
+        report.append("## Compiler Vectorization Analysis\n")
+        
+        # Analyze compiler vectorization patterns
+        original_vectorized = []
+        llm_broke_vectorization = []
+        llm_enabled_vectorization = []
+        both_not_vectorized = []
+        
+        for func_name, stats in function_stats.items():
+            if stats['original_vectorized_rate'] > 0.5 and stats['vectorized_vectorized_rate'] < 0.5:
+                llm_broke_vectorization.append(func_name)
+            if stats['original_vectorized_rate'] > 0.5:
+                original_vectorized.append(func_name)
+            if stats['original_vectorized_rate'] < 0.5 and stats['vectorized_vectorized_rate'] > 0.5:
+                llm_enabled_vectorization.append(func_name)
+            if stats['original_vectorized_rate'] < 0.5 and stats['vectorized_vectorized_rate'] < 0.5:
+                both_not_vectorized.append(func_name)
+        
+        report.append("### Vectorization Patterns:")
+        report.append(f"- **Original Already Vectorized**: {len(original_vectorized)} functions")
+        if original_vectorized:
+            report.append(f"  - Functions: {', '.join(original_vectorized[:10])}")
+        report.append(f"- **LLM Broke Vectorization**: {len(llm_broke_vectorization)} functions")
+        if llm_broke_vectorization:
+            report.append(f"  - Functions: {', '.join(llm_broke_vectorization[:10])}")
+        report.append(f"- **LLM Enabled Vectorization**: {len(llm_enabled_vectorization)} functions")
+        if llm_enabled_vectorization:
+            report.append(f"  - Functions: {', '.join(llm_enabled_vectorization[:10])}")
+        report.append(f"- **Both Not Vectorized**: {len(both_not_vectorized)} functions")
+        report.append("")
+        
         # Function-level detailed analysis
         report.append("## Function-Level Statistical Analysis\n")
         
-        # Sort functions by success rate confidence
+        # Sort functions by true success rate, then by speedup
         sorted_functions = sorted(function_stats.items(), 
-                                key=lambda x: x[1]['success_rate'], reverse=True)
+                                key=lambda x: (x[1]['true_success_rate'], 
+                                             x[1]['speedup_stats']['mean'] if x[1]['speedup_stats'] else 0), 
+                                reverse=True)
         
         for func_name, stats in sorted_functions:
             report.append(f"### {func_name}")
             report.append(f"- **Runs**: {stats['n_runs']}")
-            report.append(f"- **Success rate**: {stats['success_rate']:.1%} "
+            report.append(f"- **Checksum pass rate**: {stats['success_rate']:.1%} "
                          f"(95% CI: {stats['success_ci'][0]:.1%} - {stats['success_ci'][1]:.1%})")
+            report.append(f"- **True success rate**: {stats['true_success_rate']:.1%} "
+                         f"(95% CI: {stats['true_success_ci'][0]:.1%} - {stats['true_success_ci'][1]:.1%})")
             
             if stats['speedup_stats']:
                 sp = stats['speedup_stats']
@@ -336,13 +443,54 @@ class VectorizationStatistics:
         if variable_funcs:
             report.append(f"- {', '.join(variable_funcs)}")
         
+        # Failed Cases Analysis
+        report.append("\n## Failed Cases Analysis\n")
+        
+        # Functions that completely failed
+        complete_failures = [f for f, s in function_stats.items() if s['success_count'] == 0]
+        partial_failures = [f for f, s in function_stats.items() 
+                          if 0 < s['success_count'] < s['n_runs']]
+        no_improvement = [f for f, s in function_stats.items() 
+                         if s['success_count'] > 0 and s['true_success_count'] == 0]
+        
+        if complete_failures:
+            report.append(f"### Complete Failures: {len(complete_failures)} functions")
+            report.append(f"- Functions: {', '.join(complete_failures)}")
+            report.append("")
+        
+        if partial_failures:
+            report.append(f"### Partial Failures: {len(partial_failures)} functions")
+            for func in partial_failures[:5]:
+                stats = function_stats[func]
+                report.append(f"- {func}: {stats['success_count']}/{stats['n_runs']} runs succeeded")
+            if len(partial_failures) > 5:
+                report.append(f"- ... and {len(partial_failures) - 5} more")
+            report.append("")
+        
+        if no_improvement:
+            report.append(f"### No Performance Improvement: {len(no_improvement)} functions")
+            report.append("Functions that passed correctness but had speedup < 1.0x:")
+            no_imp_with_speedup = []
+            for func in no_improvement:
+                if function_stats[func]['speedup_stats']:
+                    speedup = function_stats[func]['speedup_stats']['mean']
+                    no_imp_with_speedup.append((func, speedup))
+            
+            sorted_no_imp = sorted(no_imp_with_speedup, key=lambda x: x[1])
+            func_list = ', '.join([f"{f[0]} ({f[1]:.2f}x)" for f in sorted_no_imp[:10]])
+            report.append(f"- {func_list}")
+            if len(sorted_no_imp) > 10:
+                report.append(f"- ... and {len(sorted_no_imp) - 10} more")
+            report.append("")
+        
         # Recommendations
         report.append("\n## Statistical Recommendations\n")
-        report.append("1. **High-confidence functions**: Focus on functions with success rate CI > 80%")
+        report.append("1. **High-confidence functions**: Focus on functions with true success rate CI > 80%")
         report.append("2. **Variable functions**: Investigate sources of variability (CV > 0.5)")
         report.append("3. **Consistent performers**: Leverage functions with stable speedups (CV < 0.2)")
         report.append("4. **Compiler interaction**: Monitor functions with variable compiler vectorization")
         report.append("5. **Sample size**: Consider more runs for functions with wide confidence intervals")
+        report.append("6. **Performance threshold**: Functions with speedup < 1.0x are considered failures")
         
         return '\n'.join(report)
     
