@@ -6,6 +6,7 @@ import time
 import re
 import glob
 import shutil
+from alive2_verifier import Alive2Verifier
 
 def cleanup_workspace():
     """Clean up workspace before running vectorizer"""
@@ -49,7 +50,7 @@ def cleanup_workspace():
             pass
 
 class TSVCVectorizerExperiment:
-    def __init__(self, api_key):
+    def __init__(self, api_key, enable_alive2=False, alive2_path=None):
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model = "claude-sonnet-4-20250514"
         self.max_iterations = 3
@@ -58,6 +59,18 @@ class TSVCVectorizerExperiment:
         
         # Extract test functions - will be populated by run_experiment
         self.test_functions = {}
+        
+        # Initialize Alive2 verifier if enabled
+        self.enable_alive2 = enable_alive2
+        self.alive2_verifier = None
+        if enable_alive2:
+            try:
+                self.alive2_verifier = Alive2Verifier(alive2_path)
+                print("Alive2 formal verification enabled")
+            except RuntimeError as e:
+                print(f"WARNING: Alive2 initialization failed: {e}")
+                print("Continuing without formal verification")
+                self.enable_alive2 = False
     
     def extract_tsvc_functions(self, function_names=None):
         """Extract function code from tsvc.c file"""       
@@ -570,6 +583,88 @@ real_t test(real_t* A){
             # Fallback to rough estimates if file parsing fails
             return 30, 60
 
+    def run_alive2_verification(self, func_name, original_func, vectorized_func, 
+                                modified_tsvc_path, iteration):
+        """Run Alive2 formal verification on the transformation."""
+        if not self.enable_alive2 or not self.alive2_verifier:
+            return None
+        
+        print(f"  Running Alive2 formal verification...")
+        
+        # Get include directories
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        include_dirs = [script_dir]
+        
+        # Create minimal C files for each function
+        original_c = f"""
+#include "common.h"
+#include "array_defs.h"
+#include <sys/time.h>
+
+// Array declarations
+__attribute__((aligned(ARRAY_ALIGNMENT))) real_t a[LEN_1D],b[LEN_1D],c[LEN_1D],d[LEN_1D],e[LEN_1D];
+__attribute__((aligned(ARRAY_ALIGNMENT))) real_t aa[LEN_2D][LEN_2D],bb[LEN_2D][LEN_2D],cc[LEN_2D][LEN_2D];
+
+// Dummy function stub
+int dummy(real_t a[LEN_1D], real_t b[LEN_1D], real_t c[LEN_1D], real_t d[LEN_1D], real_t e[LEN_1D],
+          real_t aa[LEN_2D][LEN_2D], real_t bb[LEN_2D][LEN_2D], real_t cc[LEN_2D][LEN_2D], real_t s) {{
+    return 0;
+}}
+
+{original_func}
+"""
+        
+        vectorized_c = f"""
+#include "common.h"
+#include "array_defs.h"
+#include <immintrin.h>
+#include <sys/time.h>
+
+// Array declarations
+__attribute__((aligned(ARRAY_ALIGNMENT))) real_t a[LEN_1D],b[LEN_1D],c[LEN_1D],d[LEN_1D],e[LEN_1D];
+__attribute__((aligned(ARRAY_ALIGNMENT))) real_t aa[LEN_2D][LEN_2D],bb[LEN_2D][LEN_2D],cc[LEN_2D][LEN_2D];
+
+// Dummy function stub
+int dummy(real_t a[LEN_1D], real_t b[LEN_1D], real_t c[LEN_1D], real_t d[LEN_1D], real_t e[LEN_1D],
+          real_t aa[LEN_2D][LEN_2D], real_t bb[LEN_2D][LEN_2D], real_t cc[LEN_2D][LEN_2D], real_t s) {{
+    return 0;
+}}
+
+{vectorized_func}
+"""
+        
+        try:
+            result = self.alive2_verifier.create_verification_wrapper(
+                original_c, vectorized_c, func_name, include_dirs
+            )
+            
+            # Save verification results
+            workspace_root = os.path.join(os.path.dirname(__file__), '../..')
+            workspace_root = os.path.abspath(workspace_root)
+            attempts_dir = os.path.join(workspace_root, f"tsvc_vectorized_attempts/{func_name}")
+            
+            with open(os.path.join(attempts_dir, f"alive2_verification_{iteration}.txt"), 'w') as f:
+                f.write(f"Alive2 Verification Results for {func_name}\n")
+                f.write("=" * 60 + "\n\n")
+                f.write(f"Verified: {result.get('verified', False)}\n")
+                f.write(f"Stage: {result.get('stage', 'unknown')}\n")
+                if result.get('error'):
+                    f.write(f"Error: {result['error']}\n")
+                if result.get('counterexample'):
+                    f.write(f"\nCounterexample:\n{result['counterexample']}\n")
+                if result.get('output'):
+                    f.write(f"\nFull Output:\n{result['output']}\n")
+            
+            return result
+            
+        except Exception as e:
+            print(f"  Alive2 verification failed with exception: {e}")
+            return {
+                'verified': False,
+                'error': f'Exception during verification: {str(e)}',
+                'stage': 'exception'
+            }
+    
     def parse_vectorization_info(self, stderr_output, func_name, modified_tsvc_path):
         """Parse compiler vectorization information from stderr output
         
@@ -867,6 +962,31 @@ real_t test(real_t* A){
                 'performance_data': None,
                 'vectorization_info': vectorization_info
             }
+        
+        # Run Alive2 verification if enabled
+        alive2_result = None
+        if self.enable_alive2 and self.alive2_verifier:
+            # Get the original function code
+            original_func = self.test_functions[func_name]['code']
+            
+            # Run verification
+            alive2_result = self.run_alive2_verification(
+                func_name, original_func, vectorized_func, 
+                modified_tsvc_path, iteration
+            )
+            
+            # If Alive2 found a counterexample, fail immediately
+            if alive2_result and not alive2_result.get('verified', False):
+                return {
+                    'success': False,
+                    'error_type': 'formal_verification_failed',
+                    'error_message': f"Alive2 formal verification failed: {alive2_result.get('error', 'Unknown error')}",
+                    'test_output': None,
+                    'hint': 'The vectorized code is not semantically equivalent to the original. Check the transformation logic.',
+                    'performance_data': None,
+                    'vectorization_info': vectorization_info,
+                    'alive2_result': alive2_result
+                }
         
         # Run the test
         try:
@@ -1278,7 +1398,8 @@ Please fix the issue and generate a corrected vectorized function."""
                 'test_output': test_result.get('test_output'),
                 'error_message': test_result.get('error_message'),
                 'hint': test_result.get('hint'),
-                'vectorization_info': test_result.get('vectorization_info')
+                'vectorization_info': test_result.get('vectorization_info'),
+                'alive2_result': test_result.get('alive2_result')
             })
             
             if test_result['success']:
@@ -1431,7 +1552,15 @@ def main():
     # Get all functions from tsvc.c
     all_functions = get_all_tsvc_functions()
     
-    experiment = TSVCVectorizerExperiment(api_key)
+    # Check if Alive2 is available (optional)
+    enable_alive2 = False
+    alive2_path = None  # Set to specific path if not in PATH
+    
+    # You can enable Alive2 by setting this to True
+    # enable_alive2 = True
+    
+    experiment = TSVCVectorizerExperiment(api_key, enable_alive2=enable_alive2, 
+                                         alive2_path=alive2_path)
     
     # Run all functions
     experiment.run_experiment(functions_to_test=all_functions)
