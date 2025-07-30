@@ -101,9 +101,10 @@ class MultipleExperimentRunner:
     def copy_necessary_files(self, output_dir: str):
         """Copy necessary files to experiment directory"""
         core_dir = os.path.join(self.base_dir, "src", "core")
+        tools_dir = os.path.join(self.base_dir, "src", "tools")
         
         # Files to copy from core directory
-        files_to_copy = [
+        core_files = [
             "tsvc.c",
             "common.h", 
             "common.c",
@@ -112,8 +113,19 @@ class MultipleExperimentRunner:
             "Makefile"
         ]
         
-        for file_name in files_to_copy:
+        for file_name in core_files:
             src_path = os.path.join(core_dir, file_name)
+            dst_path = os.path.join(output_dir, file_name)
+            if os.path.exists(src_path):
+                shutil.copy2(src_path, dst_path)
+        
+        # Files to copy from tools directory
+        tools_files = [
+            "alive2_verifier.py"
+        ]
+        
+        for file_name in tools_files:
+            src_path = os.path.join(tools_dir, file_name)
             dst_path = os.path.join(output_dir, file_name)
             if os.path.exists(src_path):
                 shutil.copy2(src_path, dst_path)
