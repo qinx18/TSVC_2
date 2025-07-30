@@ -35,21 +35,21 @@ real_t sum_aa_bb();
 real_t sum_flat_2d_array();
 
 real_t sum1d(real_t arr[LEN_1D]){
-    real_t ret = 0.;
+    double ret = 0.;  // Use double precision for accumulation
     for (int i = 0; i < LEN_1D; i++)
         ret += arr[i];
-    return ret;
+    return (real_t)ret;  // Cast back to real_t for return
 }
 
 real_t sum2d(real_t arr[LEN_2D][LEN_2D]){
-    real_t sum = 0.;
+    double sum = 0.;  // Use double precision for accumulation
     for (int i = 0; i < LEN_2D; i++){
         for (int j = 0; j < LEN_2D; j++){
             sum += arr[i][j];
         }
     }
 
-    return sum;
+    return (real_t)sum;  // Cast back to real_t for return
 }
 
 real_t sum_x()

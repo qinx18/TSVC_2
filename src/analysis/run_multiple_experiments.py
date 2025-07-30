@@ -33,7 +33,7 @@ class MultipleExperimentRunner:
     def modify_vectorizer_for_seed(self, seed: int, output_dir: str):
         """Modify vectorizer.py to use specific seed and output directory"""
         # Read the original vectorizer.py
-        vectorizer_path = os.path.join(self.base_dir, "src", "vectorizer.py")
+        vectorizer_path = os.path.join(self.base_dir, "src", "tools", "vectorizer.py")
         
         with open(vectorizer_path, 'r') as f:
             content = f.read()
@@ -100,27 +100,23 @@ class MultipleExperimentRunner:
     
     def copy_necessary_files(self, output_dir: str):
         """Copy necessary files to experiment directory"""
-        src_dir = os.path.join(self.base_dir, "src")
+        core_dir = os.path.join(self.base_dir, "src", "core")
         
-        # Files to copy
+        # Files to copy from core directory
         files_to_copy = [
             "tsvc.c",
             "common.h", 
             "common.c",
             "dummy.c",
-            "array_defs.h"
+            "array_defs.h",
+            "Makefile"
         ]
         
         for file_name in files_to_copy:
-            src_path = os.path.join(src_dir, file_name)
+            src_path = os.path.join(core_dir, file_name)
             dst_path = os.path.join(output_dir, file_name)
             if os.path.exists(src_path):
                 shutil.copy2(src_path, dst_path)
-        
-        # Copy Makefile
-        makefile_path = os.path.join(self.base_dir, "Makefile")
-        if os.path.exists(makefile_path):
-            shutil.copy2(makefile_path, output_dir)
     
     def run_single_experiment(self, run_idx: int, seed: int, output_dir: str):
         """Run a single experiment with specified seed"""
