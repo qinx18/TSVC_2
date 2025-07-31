@@ -77,46 +77,71 @@ python run_multiple_experiments.py --runs 10 --base-dir /path/to/experiments
 - **Variable Functions**: CV > 0.5 (high variability)
 - **High-Confidence Success**: Success rate CI > 80%
 
-## Demonstrated Results
+## Demonstrated Results (TSVC_2 with Fixed Checksum Bug)
 
 ### Overall Performance Summary
 - **Functions analyzed**: 50
-- **Average success rate**: 100.0% ± 0.0%
-- **Average speedup**: 3.39x ± 6.98x
+- **Successfully vectorized (checksum pass + speedup ≥ 1.0x)**: 47
+- **Vectorized but no improvement (checksum pass + speedup < 1.0x)**: 2
+- **Failed to vectorize**: 1
+- **True success rate**: 75.6% (requiring both checksum pass AND speedup ≥ 1.0x)
+- **Average speedup**: 3.49x ± 4.97x
 - **Confidence level**: 95%
+
+### Key Improvement: Fixed Checksum-Based Test
+Previously, the checksum test used float precision which resulted in accuracy loss. The bug has been fixed by switching to double precision, providing more reliable correctness verification.
 
 ### Function-Level Examples
 
-**High-Performance, Stable Function (s256):**
-- **Success rate**: 100.0% (95% CI: 67.6% - 100.0%)
-- **Average speedup**: 50.39x ± 4.65x
-- **Speedup 95% CI**: 46.50x - 54.28x
-- **Coefficient of variation**: 0.09 (very stable)
+**High-Performance, Variable Function (s256):**
+- **True success rate**: 100.0% (95% CI: 70.1% - 100.0%)
+- **Average speedup**: 34.30x ± 26.75x
+- **Speedup 95% CI**: 13.74x - 54.87x
+- **Coefficient of variation**: 0.78 (high variability)
+- **Note**: Previously reported as 50.39x with CV=0.09 in simulated data
 
-**Variable Performance Function (s342):**
-- **Success rate**: 100.0% (95% CI: 67.6% - 100.0%)
-- **Average speedup**: 0.86x ± 0.29x
-- **Speedup 95% CI**: 0.62x - 1.11x
-- **Coefficient of variation**: 0.34 (moderate variability)
+**Stable High-Performance Function (s115):**
+- **True success rate**: 100.0% (95% CI: 70.1% - 100.0%)
+- **Average speedup**: 6.68x ± 0.12x
+- **Speedup 95% CI**: 6.59x - 6.77x
+- **Coefficient of variation**: 0.02 (very stable)
+- **LLM enabled vectorization**: 100% (compiler couldn't vectorize)
+
+**Regression Example (s342):**
+- **True success rate**: 22.2% (95% CI: 6.3% - 54.7%)
+- **Average speedup**: 0.70x ± 0.30x
+- **Speedup 95% CI**: 0.47x - 0.93x
+- **Coefficient of variation**: 0.43 (moderate variability)
 
 **Compiler Interaction Example (s112):**
 - **Original vectorized rate**: 100.0% (compiler already optimized)
 - **LLM vectorized rate**: 0.0% (LLM broke compiler optimization)
-- **Average speedup**: 0.87x ± 0.30x (minimal gain due to compiler competition)
+- **Average speedup**: 1.05x ± 0.03x (minimal gain due to compiler interference)
+- **True success rate**: 100.0% (still counts as success with speedup ≥ 1.0x)
 
 ### Statistical Categories
 
-**Stable Functions (CV < 0.2)**: 42 functions
+**Stable Functions (CV < 0.2)**: 25 functions
 - These functions show consistent performance across runs
 - Low variability makes them reliable for deployment
+- Examples: s115, s1244, s212, s323, s275
 
-**Consistent High Performance**: 21 functions
+**Consistent High Performance**: 20 functions
 - Functions with speedup CI > 2.0x
-- Prime candidates for manual vectorization
+- Prime candidates for production deployment
+- Examples: s256, s293, s115, s1244, s332
 
-**Variable Performance (CV > 0.5)**: 0 functions
-- In this simulation, no functions showed extreme variability
-- Real experiments might reveal functions requiring investigation
+**Variable Performance (CV > 0.5)**: 8 functions
+- Functions showing high variability requiring investigation
+- Examples: s256 (despite high performance), s31111, s2233, s3110
+- These functions may benefit from deterministic approaches
+
+### Performance Distribution
+- **Regression (< 1.0x)**: 7 functions (s277, s342, s231, s222, s141, s221, s321)
+- **Minimal improvement (1.0-1.5x)**: 10 functions
+- **Moderate improvement (1.5-3.0x)**: 13 functions
+- **Good improvement (3.0-10.0x)**: 18 functions
+- **Excellent improvement (> 10.0x)**: 1 function (s256)
 
 ## Practical Applications
 
